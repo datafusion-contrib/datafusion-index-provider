@@ -15,6 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#![warn(missing_docs)]
+
 //! # DataFusion Index Provider
 //!
 //! This crate provides a comprehensive framework for adding index-based scanning capabilities
@@ -158,5 +160,12 @@
 //! - **Bounded memory**: Execution is bounded with predictable memory usage patterns
 
 pub mod physical_plan;
+/// Index-aware [`datafusion::catalog::TableProvider`] extension trait.
 pub mod provider;
+/// Core types for representing index filter structures.
 pub mod types;
+
+pub use physical_plan::fetcher::RecordFetcher;
+pub use physical_plan::Index;
+pub use provider::IndexedTableProvider;
+pub use types::{IndexFilter, IndexFilters, UnionMode};

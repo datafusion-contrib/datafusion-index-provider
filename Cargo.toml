@@ -17,8 +17,8 @@ async-trait = "0.1.89"
 datafusion = { version = "52.1.0", default-features = false }
 datafusion-common = { version = "52.1.0", default-features = false }
 futures = "0.3.32"
-futures-util = "0.3.31"
-futures-core = "0.3.31"
+futures-util = "0.3.32"
+futures-core = "0.3.32"
 log = "0.4.29"
 
 [dev-dependencies]

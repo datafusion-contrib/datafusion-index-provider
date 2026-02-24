@@ -16,6 +16,10 @@
 // under the License.
 
 //! Physical `ExecutionPlan` operators.
+
+/// Two-phase fetch execution plan that combines index scans with record fetching.
 pub mod fetch;
+/// Index scan execution plan that scans a single [`super::Index`] to produce primary key batches.
 pub mod index;
+/// Sequential union execution plan that processes children one at a time.
 pub mod sequential_union;
