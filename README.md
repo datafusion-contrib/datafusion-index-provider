@@ -232,7 +232,7 @@ The test suite includes:
 
 ## Compatibility
 
-- **DataFusion**: 51.x
+- **DataFusion**: 52.x
 - **Rust**: 1.75+ (MSRV)
 - **Arrow**: Compatible with DataFusion's Arrow version
 
