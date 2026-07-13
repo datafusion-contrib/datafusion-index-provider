@@ -1,0 +1,61 @@
+# Multi-tenant employee table with a composite primary key (tenant_id, employee_id).
+#
+# tenant_id | employee_id | name    | age | department
+# ----------+-------------+---------+-----+------------
+# acme      | 1           | Alice   | 25  | Engineering
+# acme      | 2           | Bob     | 30  | Sales
+# acme      | 3           | Charlie | 35  | Marketing
+# globex    | 1           | David   | 28  | Engineering
+# globex    | 2           | Eve     | 32  | Sales
+
+# --- single index on the composite PK ---
+
+query TITIT rowsort
+SELECT * FROM employees WHERE age = 30
+----
+acme 2 Bob 30 Sales
+
+query TITIT rowsort
+SELECT * FROM employees WHERE age > 30
+----
+acme 3 Charlie 35 Marketing
+globex 2 Eve 32 Sales
+
+# --- AND intersection across both PK columns ---
+
+query TITIT rowsort
+SELECT * FROM employees WHERE age <= 30 AND department = 'Engineering'
+----
+acme 1 Alice 25 Engineering
+globex 1 David 28 Engineering
+
+# --- OR union with dedup on the composite PK ---
+
+query TITIT rowsort
+SELECT * FROM employees WHERE age <= 25 OR department = 'Engineering'
+----
+acme 1 Alice 25 Engineering
+globex 1 David 28 Engineering
+
+query TITIT rowsort
+SELECT * FROM employees WHERE department = 'Marketing' OR department = 'Sales'
+----
+acme 2 Bob 30 Sales
+acme 3 Charlie 35 Marketing
+globex 2 Eve 32 Sales
+
+# same employee_id across different tenants must both be returned
+query TITIT rowsort
+SELECT * FROM employees WHERE department = 'Engineering'
+----
+acme 1 Alice 25 Engineering
+globex 1 David 28 Engineering
+
+# --- complex nested AND / OR ---
+
+query TITIT rowsort
+SELECT * FROM employees WHERE (age <= 25 AND department = 'Engineering') OR department = 'Sales'
+----
+acme 1 Alice 25 Engineering
+acme 2 Bob 30 Sales
+globex 2 Eve 32 Sales
