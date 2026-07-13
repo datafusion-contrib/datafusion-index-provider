@@ -78,6 +78,10 @@ impl RecordFetchExec {
     /// * `record_fetcher` - The fetcher to retrieve records by row ID
     /// * `schema` - Output schema
     /// * `union_mode` - Controls whether OR conditions use parallel or sequential union
+    ///
+    /// # Errors
+    /// Returns an error if `indexes` is empty, contains more than one root filter,
+    /// or if the input scan plan cannot be built.
     pub fn try_new(
         indexes: Vec<IndexFilter>,
         limit: Option<usize>,
@@ -125,7 +129,7 @@ impl RecordFetchExec {
         })
     }
 
-    /// Builds the input execution plan that produces primary key values based on the IndexFilter structure.
+    /// Builds the input execution plan that produces primary key values based on the `IndexFilter` structure.
     ///
     /// This method is the core of the index-based execution plan generation. It recursively
     /// processes the [`IndexFilter`] tree to create an optimized physical plan that efficiently
@@ -147,7 +151,7 @@ impl RecordFetchExec {
     /// Builds a left-deep tree of joins to intersect primary key values from multiple indexes.
     /// The joins are performed on all primary key columns to find rows that satisfy ALL conditions.
     /// Uses [`crate::physical_plan::joins::try_create_index_lookup_join`] which selects between
-    /// HashJoin and SortMergeJoin based on input ordering.
+    /// `HashJoin` and `SortMergeJoin` based on input ordering.
     ///
     /// ```text
     /// Projection(PK columns)
@@ -257,7 +261,7 @@ impl RecordFetchExec {
                     .map(|(i, field)| {
                         (
                             Arc::new(Column::new(field.name(), i)) as Arc<dyn PhysicalExpr>,
-                            field.name().to_string(),
+                            field.name().clone(),
                         )
                     })
                     .collect();
@@ -318,7 +322,7 @@ impl RecordFetchExec {
                     })?;
                 Ok((
                     Arc::new(Column::new(field.name(), idx)) as Arc<dyn PhysicalExpr>,
-                    field.name().to_string(),
+                    field.name().clone(),
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -333,7 +337,11 @@ impl DisplayAs for RecordFetchExec {
             DisplayFormatType::Default
             | DisplayFormatType::Verbose
             | DisplayFormatType::TreeRender => {
-                let index_names: Vec<_> = self.indexes.iter().map(|i| i.to_string()).collect();
+                let index_names: Vec<_> = self
+                    .indexes
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect();
                 write!(
                     f,
                     "RecordFetchExec: indexes=[{}], limit={:?}",
@@ -347,7 +355,7 @@ impl DisplayAs for RecordFetchExec {
 
 impl ExecutionPlan for RecordFetchExec {
     /// Return a reference to the name of this execution plan.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "RecordFetchExec"
     }
 
@@ -542,7 +550,7 @@ impl fmt::Debug for RecordFetchStream {
         f.debug_struct("RecordFetchStream")
             .field("schema", &self.schema)
             .field("baseline_metrics", &self.baseline_metrics)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -597,7 +605,7 @@ mod tests {
             self
         }
 
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "mock_index"
         }
 
@@ -605,11 +613,11 @@ mod tests {
             self.schema.clone()
         }
 
-        fn table_name(&self) -> &str {
+        fn table_name(&self) -> &'static str {
             "mock_table"
         }
 
-        fn column_name(&self) -> &str {
+        fn column_name(&self) -> &'static str {
             "mock_column"
         }
 
@@ -735,10 +743,13 @@ mod tests {
 
             // add a delay between each row
             let mut names = Vec::with_capacity(row_ids.len());
-            for id in row_ids.values().iter() {
+            for id in row_ids.values() {
                 // simulate an await point
                 tokio::time::sleep(Duration::from_millis(20)).await;
-                names.push(self.names[*id as usize].clone());
+                let idx = usize::try_from(*id).map_err(|e| {
+                    DataFusionError::Internal(format!("row id {id} out of range: {e}"))
+                })?;
+                names.push(self.names[idx].clone());
             }
 
             Ok(RecordBatch::try_new(
@@ -1043,6 +1054,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_record_fetch_exec_five_indexes() -> Result<()> {
+        fn count_joins(plan: &Arc<dyn ExecutionPlan>) -> usize {
+            if let Some(join_exec) = plan.downcast_ref::<HashJoinExec>() {
+                1 + count_joins(join_exec.children()[0]) + count_joins(join_exec.children()[1])
+            } else {
+                plan.children().iter().map(|c| count_joins(c)).sum()
+            }
+        }
+
         let mut indexes_vec = Vec::new();
         for i in 0..5 {
             let batch = RecordBatch::try_from_iter(vec![(
@@ -1067,14 +1086,6 @@ mod tests {
 
         // The input plan should be a ProjectionExec at the top
         assert_eq!(exec.input.name(), "ProjectionExec");
-
-        fn count_joins(plan: &Arc<dyn ExecutionPlan>) -> usize {
-            if let Some(join_exec) = plan.downcast_ref::<HashJoinExec>() {
-                1 + count_joins(join_exec.children()[0]) + count_joins(join_exec.children()[1])
-            } else {
-                plan.children().iter().map(|c| count_joins(c)).sum()
-            }
-        }
 
         let join_count = count_joins(&exec.input);
         assert_eq!(join_count, 4, "Expected 4 joins for 5 indexes");

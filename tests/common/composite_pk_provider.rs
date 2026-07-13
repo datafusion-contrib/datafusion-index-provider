@@ -27,7 +27,7 @@ pub fn composite_pk_schema() -> SchemaRef {
     ])
 }
 
-/// A multi-tenant employee table with composite PK (tenant_id, employee_id)
+/// A multi-tenant employee table with composite PK (`tenant_id`, `employee_id`)
 ///
 /// | tenant_id | employee_id | name    | age | department  |
 /// |-----------|-------------|---------|-----|-------------|

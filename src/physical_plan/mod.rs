@@ -44,7 +44,11 @@ use std::sync::Arc;
 /// # Arguments
 /// * `schema` - The schema of the output plan. All columns are treated as primary key columns.
 /// * `ordered` - Whether the output is ordered by the primary key columns.
-pub fn create_plan_properties_for_pk_scan(schema: SchemaRef, ordered: bool) -> Arc<PlanProperties> {
+#[must_use]
+pub fn create_plan_properties_for_pk_scan(
+    schema: &SchemaRef,
+    ordered: bool,
+) -> Arc<PlanProperties> {
     let mut eq_properties = EquivalenceProperties::new(schema.clone());
     if ordered {
         let sort_exprs: Vec<PhysicalSortExpr> = schema
@@ -124,6 +128,10 @@ pub trait Index: fmt::Debug + Send + Sync + 'static {
     /// # Default implementation
     /// The default implementation checks if any column referenced in the predicate
     /// matches the value of [`Self::column_name`].
+    ///
+    /// # Errors
+    /// Returns an error if the predicate expression cannot be analyzed for its
+    /// referenced columns.
     fn supports_predicate(&self, predicate: &Expr) -> Result<bool> {
         let mut columns = HashSet::new();
         expr_to_columns(predicate, &mut columns)?;
@@ -141,6 +149,9 @@ pub trait Index: fmt::Debug + Send + Sync + 'static {
     /// Creates a stream of primary key values that satisfy the given filters.
     ///
     /// The output of this stream MUST have a schema matching [`Self::index_schema()`].
+    ///
+    /// # Errors
+    /// Returns an error if the index scan cannot be initialized for the given filters.
     fn scan(
         &self,
         filters: &[Expr],

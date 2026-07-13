@@ -170,7 +170,10 @@ async fn test_employee_table_filter_age_and_department_no_result() {
         .await
         .unwrap();
 
-    let total_rows: usize = results.iter().map(|b| b.num_rows()).sum();
+    let total_rows: usize = results
+        .iter()
+        .map(datafusion::arrow::array::RecordBatch::num_rows)
+        .sum();
     assert_eq!(total_rows, 0);
 }
 
@@ -720,7 +723,10 @@ async fn test_employee_table_filter_edge_case_single_and_in_or() {
         .await
         .unwrap();
 
-    let total_rows: usize = results.iter().map(|b| b.num_rows()).sum();
+    let total_rows: usize = results
+        .iter()
+        .map(datafusion::arrow::array::RecordBatch::num_rows)
+        .sum();
     assert_eq!(total_rows, 0);
 }
 

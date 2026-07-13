@@ -17,10 +17,10 @@
 
 #![warn(missing_docs)]
 
-//! # DataFusion Index Provider
+//! # `DataFusion` Index Provider
 //!
 //! This crate provides a comprehensive framework for adding index-based scanning capabilities
-//! to DataFusion [`datafusion::datasource::TableProvider`]s. It enables efficient query execution
+//! to `DataFusion` [`datafusion::datasource::TableProvider`]s. It enables efficient query execution
 //! by leveraging secondary indexes to reduce I/O and improve query performance through a
 //! sophisticated two-phase execution model.
 //!
@@ -38,7 +38,7 @@
 //!
 //! ### Index Management
 //! - [`physical_plan::Index`]: Trait representing a physical index that can be scanned to retrieve primary key values
-//! - [`provider::IndexedTableProvider`]: Extension of DataFusion's `TableProvider` with index discovery
+//! - [`provider::IndexedTableProvider`]: Extension of `DataFusion`'s `TableProvider` with index discovery
 //! - [`types::IndexFilter`]: Enum representing filter operations that can be pushed down to indexes
 //!
 //! ### Execution Engine  
@@ -57,7 +57,7 @@
 //! - **Default implementation**: Supports any predicate that references the index's column name
 //! - **Custom implementations**: Can implement sophisticated predicate analysis for complex index types
 //!
-//! ### IndexedTableProvider Filter Analysis
+//! ### `IndexedTableProvider` Filter Analysis
 //! The [`provider::IndexedTableProvider`] trait provides comprehensive filter analysis through
 //! `build_index_filter()`:
 //!
@@ -96,7 +96,7 @@
 //! The [`physical_plan::exec::fetch::RecordFetchExec`] generates
 //! optimized execution plans based on the [`types::IndexFilter`] structure:
 //!
-//! ### IndexFilter::Single - Direct Index Scan
+//! ### `IndexFilter::Single` - Direct Index Scan
 //!
 //! For simple conditions on a single indexed column:
 //! ```text
@@ -104,7 +104,7 @@
 //! └── IndexScanExec (target_index)
 //! ```
 //!
-//! ### IndexFilter::And - Index Intersection
+//! ### `IndexFilter::And` - Index Intersection
 //!
 //! For conjunctive conditions across multiple indexes, the system builds a left-deep tree
 //! of joins to intersect primary key values:
@@ -119,7 +119,7 @@
 //!         └── IndexScanExec (col_c_index)
 //! ```
 //!
-//! ### IndexFilter::Or - Union with Deduplication
+//! ### `IndexFilter::Or` - Union with Deduplication
 //!
 //! For disjunctive conditions, the system uses `UnionExec` followed by `AggregateExec`
 //! for automatic primary key deduplication:
@@ -138,9 +138,9 @@
 //! ## Implementation Guide
 //!
 //! - **Implement the Index Trait**: Create indexes that can scan and return primary key values
-//! - **Implement the RecordFetcher Trait**: Define how to fetch complete records using primary key values
-//! - **Implement IndexedTableProvider**: Expose available indexes and filter analysis capabilities
-//! - **Update TableProvider Implementation**: Integrate index-based execution into your scan method
+//! - **Implement the `RecordFetcher` Trait**: Define how to fetch complete records using primary key values
+//! - **Implement `IndexedTableProvider`**: Expose available indexes and filter analysis capabilities
+//! - **Update `TableProvider` Implementation**: Integrate index-based execution into your scan method
 //!
 //! ## Performance Characteristics
 //!

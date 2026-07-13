@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use datafusion::arrow::array::{Int32Array, StringArray};
+use datafusion::arrow::array::{Int32Array, StringArray, UInt64Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -45,6 +45,8 @@ impl EmployeeTableProvider {
         ]));
 
         let id_array = Int32Array::from(vec![1, 2, 3, 4, 5]);
+        // Row identifiers matching the index schema's UInt64 primary key column.
+        let pk_ids = UInt64Array::from(vec![1u64, 2, 3, 4, 5]);
         let name_array = StringArray::from(vec!["Alice", "Bob", "Charlie", "David", "Eve"]);
         let age_array = Int32Array::from(vec![25, 30, 35, 28, 32]);
         let department_array = StringArray::from(vec![
@@ -68,8 +70,8 @@ impl EmployeeTableProvider {
 
         EmployeeTableProvider {
             schema,
-            age_index: Arc::new(AgeIndex::new(&age_array, &id_array)),
-            department_index: Arc::new(DepartmentIndex::new(&department_array, &id_array)),
+            age_index: Arc::new(AgeIndex::new(&age_array, &pk_ids)),
+            department_index: Arc::new(DepartmentIndex::new(&department_array, &pk_ids)),
             mapper: Arc::new(BatchMapper::new(vec![batch])),
             union_mode: UnionMode::Parallel,
         }
@@ -155,7 +157,7 @@ impl EmployeeTableProvider {
         )?))
     }
 
-    /// Builds an ExecutionPlan to scan the table.
+    /// Builds an `ExecutionPlan` to scan the table.
     /// This is the main entry point for scanning the table without indexes.
     /// It is designed to be called by `scan_with_indexes_or_fallback`.
     async fn scan_with_table(

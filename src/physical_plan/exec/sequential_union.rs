@@ -17,7 +17,7 @@
 
 //! Sequential union execution plan that processes inputs without spawning tasks.
 //!
-//! This module provides [`SequentialUnionExec`], an alternative to DataFusion's
+//! This module provides [`SequentialUnionExec`], an alternative to `DataFusion`'s
 //! [`UnionExec`](datafusion::physical_plan::union::UnionExec) that reports a single partition and processes all input partitions
 //! sequentially. This avoids the task spawning that occurs when `CoalescePartitionsExec`
 //! is inserted for multi-partition plans.
@@ -41,7 +41,7 @@ use futures::Stream;
 
 /// A union execution plan that processes all inputs sequentially in a single partition.
 ///
-/// Unlike DataFusion's [`UnionExec`](datafusion::physical_plan::union::UnionExec) which reports N partitions for N inputs (causing
+/// Unlike `DataFusion`'s [`UnionExec`](datafusion::physical_plan::union::UnionExec) which reports N partitions for N inputs (causing
 /// `CoalescePartitionsExec` to be inserted and spawn Tokio tasks), this operator
 /// always reports exactly 1 partition and chains all input partition streams sequentially.
 ///
@@ -71,7 +71,10 @@ impl SequentialUnionExec {
     /// * `inputs` - Execution plans to union. Must be non-empty and have compatible schemas.
     ///
     /// # Returns
-    /// A new `SequentialUnionExec` or an error if:
+    /// A new `SequentialUnionExec`.
+    ///
+    /// # Errors
+    /// Returns an error if:
     /// - `inputs` is empty
     /// - Input schemas are incompatible
     pub fn try_new(inputs: Vec<Arc<dyn ExecutionPlan>>) -> Result<Self> {
@@ -119,10 +122,9 @@ impl SequentialUnionExec {
 impl DisplayAs for SequentialUnionExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match t {
-            DisplayFormatType::Default | DisplayFormatType::Verbose => {
-                write!(f, "SequentialUnionExec")
-            }
-            DisplayFormatType::TreeRender => {
+            DisplayFormatType::Default
+            | DisplayFormatType::Verbose
+            | DisplayFormatType::TreeRender => {
                 write!(f, "SequentialUnionExec")
             }
         }
@@ -130,7 +132,7 @@ impl DisplayAs for SequentialUnionExec {
 }
 
 impl ExecutionPlan for SequentialUnionExec {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "SequentialUnionExec"
     }
 

@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use datafusion::arrow::array::{
-    Array, ArrayRef, Int32Array, RecordBatch, StringArray, UInt64Array,
-};
+use datafusion::arrow::array::{Array, ArrayRef, RecordBatch, StringArray, UInt64Array};
 use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::datatypes::Field;
 use datafusion::arrow::datatypes::SchemaRef;
@@ -18,12 +16,12 @@ use datafusion_index_provider::physical_plan::Index;
 
 #[derive(Debug)]
 pub struct DepartmentIndex {
-    index: BTreeMap<String, Vec<i32>>,
+    index: BTreeMap<String, Vec<u64>>,
 }
 
 impl DepartmentIndex {
-    pub fn new(departments: &StringArray, ids: &Int32Array) -> Self {
-        let mut index: BTreeMap<String, Vec<i32>> = BTreeMap::new();
+    pub fn new(departments: &StringArray, ids: &UInt64Array) -> Self {
+        let mut index: BTreeMap<String, Vec<u64>> = BTreeMap::new();
         for i in 0..departments.len() {
             let department = departments.value(i).to_string();
             let row_id = ids.value(i);
@@ -57,7 +55,7 @@ impl DepartmentIndex {
             }
         }
 
-        let mut final_row_ids: Vec<u64> = row_ids.into_iter().map(|id| id as u64).collect();
+        let mut final_row_ids: Vec<u64> = row_ids.into_iter().collect();
 
         if let Some(l) = limit {
             final_row_ids.truncate(l);
@@ -80,7 +78,7 @@ impl Index for DepartmentIndex {
         self
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "department_index"
     }
 
@@ -88,11 +86,11 @@ impl Index for DepartmentIndex {
         create_index_schema([Field::new("id", DataType::UInt64, false)])
     }
 
-    fn table_name(&self) -> &str {
+    fn table_name(&self) -> &'static str {
         "employees"
     }
 
-    fn column_name(&self) -> &str {
+    fn column_name(&self) -> &'static str {
         "department"
     }
 

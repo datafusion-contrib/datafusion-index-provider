@@ -45,7 +45,7 @@ use std::sync::Arc;
 /// ## Performance Considerations
 /// - Filter selectivity directly impacts downstream performance
 /// - Limit pushdown reduces unnecessary index scanning and memory usage
-/// - Ordered indexes enable optimized downstream joins via SortMergeJoin
+/// - Ordered indexes enable optimized downstream joins via `SortMergeJoin`
 #[derive(Debug)]
 pub struct IndexScanExec {
     /// The index to scan.
@@ -83,7 +83,7 @@ impl DisplayAs for IndexScanExec {
 
 impl ExecutionPlan for IndexScanExec {
     /// Return a reference to the name of this execution plan.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "IndexScanExec"
     }
 
@@ -138,6 +138,9 @@ impl IndexScanExec {
     /// A configured `IndexScanExec` that will scan the index with the specified parameters.
     /// The execution plan will automatically detect if the index produces ordered results
     /// and configure appropriate output ordering properties for downstream optimization.
+    ///
+    /// # Errors
+    /// Returns an error if the plan properties cannot be computed for the given schema.
     pub fn try_new(
         index: Arc<dyn Index>,
         filters: Vec<Expr>,
@@ -149,15 +152,14 @@ impl IndexScanExec {
                 .fields()
                 .iter()
                 .enumerate()
-                .map(|(i, field)| PhysicalSortExpr {
-                    expr: Arc::new(Column::new(field.name(), i)),
-                    options: Default::default(),
+                .map(|(i, field)| {
+                    PhysicalSortExpr::new_default(Arc::new(Column::new(field.name(), i))).asc()
                 })
                 .collect()
         } else {
             vec![]
         };
-        let eq = EquivalenceProperties::new_with_orderings(schema.clone(), [ordering]);
+        let eq = EquivalenceProperties::new_with_orderings(schema, [ordering]);
 
         let plan_properties = Arc::new(PlanProperties::new(
             eq,
@@ -205,7 +207,7 @@ mod tests {
             self
         }
 
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "mock_index"
         }
 
@@ -213,11 +215,11 @@ mod tests {
             self.schema.clone()
         }
 
-        fn table_name(&self) -> &str {
+        fn table_name(&self) -> &'static str {
             "mock_table"
         }
 
-        fn column_name(&self) -> &str {
+        fn column_name(&self) -> &'static str {
             "mock_column"
         }
 

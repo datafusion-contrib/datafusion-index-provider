@@ -90,7 +90,7 @@ impl Index for CompositePkDeptIndex {
         self
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "composite_dept_index"
     }
 
@@ -98,11 +98,11 @@ impl Index for CompositePkDeptIndex {
         composite_pk_schema()
     }
 
-    fn table_name(&self) -> &str {
+    fn table_name(&self) -> &'static str {
         "multi_tenant_employees"
     }
 
-    fn column_name(&self) -> &str {
+    fn column_name(&self) -> &'static str {
         "department"
     }
 

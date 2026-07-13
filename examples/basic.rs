@@ -18,7 +18,7 @@
 //! Basic example demonstrating how to use `datafusion-index-provider`.
 //!
 //! This example creates an in-memory table with an age index and a department index,
-//! registers it as a DataFusion table, and runs queries that leverage index-based scans.
+//! registers it as a `DataFusion` table, and runs queries that leverage index-based scans.
 
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,12 +53,12 @@ use datafusion_index_provider::{IndexedTableProvider, RecordFetcher, UnionMode};
 #[derive(Debug)]
 struct AgeIndex {
     /// age -> list of row ids
-    index: BTreeMap<i32, Vec<i32>>,
+    index: BTreeMap<i32, Vec<u64>>,
 }
 
 impl AgeIndex {
-    fn new(ages: &Int32Array, ids: &Int32Array) -> Self {
-        let mut index: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
+    fn new(ages: &Int32Array, ids: &UInt64Array) -> Self {
+        let mut index: BTreeMap<i32, Vec<u64>> = BTreeMap::new();
         for i in 0..ages.len() {
             index.entry(ages.value(i)).or_default().push(ids.value(i));
         }
@@ -66,7 +66,7 @@ impl AgeIndex {
     }
 
     fn matching_ids(&self, filters: &[Expr], limit: Option<usize>) -> Vec<u64> {
-        let mut ids: BTreeSet<i32> = BTreeSet::new();
+        let mut ids: BTreeSet<u64> = BTreeSet::new();
         for filter in filters {
             if let Expr::BinaryExpr(be) = filter {
                 if let (Expr::Column(c), Expr::Literal(ScalarValue::Int32(Some(v)), _)) =
@@ -82,7 +82,7 @@ impl AgeIndex {
                             }
                         }
                         Operator::Gt => {
-                            ids.extend(self.index.range((v + 1)..).flat_map(|(_, l)| l))
+                            ids.extend(self.index.range((v + 1)..).flat_map(|(_, l)| l));
                         }
                         Operator::GtEq => ids.extend(self.index.range(v..).flat_map(|(_, l)| l)),
                         Operator::Lt => ids.extend(self.index.range(..v).flat_map(|(_, l)| l)),
@@ -92,7 +92,7 @@ impl AgeIndex {
                 }
             }
         }
-        let mut result: Vec<u64> = ids.into_iter().map(|id| id as u64).collect();
+        let mut result: Vec<u64> = ids.into_iter().collect();
         if let Some(l) = limit {
             result.truncate(l);
         }
@@ -104,16 +104,16 @@ impl Index for AgeIndex {
     fn as_any(&self) -> &dyn Any {
         self
     }
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "age_index"
     }
     fn index_schema(&self) -> SchemaRef {
         create_index_schema([Field::new("id", DataType::UInt64, false)])
     }
-    fn table_name(&self) -> &str {
+    fn table_name(&self) -> &'static str {
         "employees"
     }
-    fn column_name(&self) -> &str {
+    fn column_name(&self) -> &'static str {
         "age"
     }
     fn scan(
@@ -168,7 +168,7 @@ impl RecordFetcher for InMemoryFetcher {
             .expect("expected UInt64Array for primary key column");
 
         // Convert 1-based ids to 0-based indices for arrow take
-        let indices = Int32Array::from_iter_values(ids.iter().flatten().map(|id| (id - 1) as i32));
+        let indices = UInt64Array::from_iter_values(ids.iter().flatten().map(|id| id - 1));
 
         let columns: Result<Vec<ArrayRef>> = self
             .batch
@@ -266,20 +266,17 @@ async fn main() -> Result<()> {
         ],
     )?;
 
-    let ids = batch
-        .column(0)
-        .as_any()
-        .downcast_ref::<Int32Array>()
-        .unwrap();
     let ages = batch
         .column(2)
         .as_any()
         .downcast_ref::<Int32Array>()
-        .unwrap();
+        .expect("age column is an Int32Array");
+    // Row identifiers matching the index schema's UInt64 primary key column.
+    let pk_ids = UInt64Array::from(vec![1u64, 2, 3, 4, 5]);
 
     let provider = EmployeeTable {
         schema: schema.clone(),
-        age_index: Arc::new(AgeIndex::new(ages, ids)),
+        age_index: Arc::new(AgeIndex::new(ages, &pk_ids)),
         fetcher: Arc::new(InMemoryFetcher {
             batch: batch.clone(),
         }),
