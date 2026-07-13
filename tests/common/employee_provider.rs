@@ -105,9 +105,7 @@ impl TableProvider for EmployeeTableProvider {
         let (indexed_filters, remaining_filters) = self.analyze_and_optimize_filters(filters)?;
 
         if indexed_filters.is_empty() {
-            return self
-                .scan_with_table(state, projection, &remaining_filters, limit)
-                .await;
+            return self.scan_with_table(state, projection, &remaining_filters, limit);
         }
 
         self.scan_with_indexes(
@@ -117,7 +115,6 @@ impl TableProvider for EmployeeTableProvider {
             limit,
             &indexed_filters,
         )
-        .await
     }
 
     fn supports_filters_pushdown(
@@ -140,7 +137,7 @@ impl IndexedTableProvider for EmployeeTableProvider {
 }
 
 impl EmployeeTableProvider {
-    async fn scan_with_indexes(
+    fn scan_with_indexes(
         &self,
         _state: &dyn Session,
         _projection: Option<&Vec<usize>>,
@@ -160,7 +157,7 @@ impl EmployeeTableProvider {
     /// Builds an `ExecutionPlan` to scan the table.
     /// This is the main entry point for scanning the table without indexes.
     /// It is designed to be called by `scan_with_indexes_or_fallback`.
-    async fn scan_with_table(
+    fn scan_with_table(
         &self,
         _state: &dyn Session,
         _projection: Option<&Vec<usize>>,

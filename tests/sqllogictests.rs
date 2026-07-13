@@ -33,11 +33,11 @@ use indicatif::ProgressBar;
 use sqllogictest::Runner;
 
 /// Builds the `SessionContext` a given `.slt` file expects, keyed by file stem.
-async fn context_for(stem: &str) -> SessionContext {
+fn context_for(stem: &str) -> SessionContext {
     match stem {
-        "employees" => common::setup_test_env().await,
-        "employees_sequential" => common::setup_test_env_sequential().await,
-        "composite_pk" => common::setup_composite_pk_test_env().await,
+        "employees" => common::setup_test_env(),
+        "employees_sequential" => common::setup_test_env_sequential(),
+        "composite_pk" => common::setup_composite_pk_test_env(),
         other => panic!("no context factory registered for slt file `{other}`"),
     }
 }
@@ -61,7 +61,7 @@ async fn sqllogictests() {
             .and_then(|s| s.to_str())
             .expect("slt file has a valid stem")
             .to_owned();
-        let ctx = context_for(&stem).await;
+        let ctx = context_for(&stem);
 
         let relative_path = path.clone();
         let mut runner = Runner::new(|| {

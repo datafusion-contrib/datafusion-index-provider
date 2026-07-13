@@ -32,5 +32,3 @@ indicatif = "0.18"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-# async kept on trait methods for API symmetry / future awaits
-unused_async = "allow"
