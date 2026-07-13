@@ -222,18 +222,21 @@ cargo test
 # Run with logging
 RUST_LOG=debug cargo test
 
-# Run integration tests only
-cargo test --test integration_tests
+# Run the SQL logic tests only
+cargo test --test sqllogictests
+
+# Regenerate the expected .slt results after an intended change
+SLT_COMPLETE=1 cargo test --test sqllogictests
 ```
 
 The test suite includes:
 - 27 unit tests covering execution plan generation and streaming
-- 36 integration tests covering query scenarios from simple to deeply nested, with both single and composite primary keys
+- SQL logic tests (`tests/slt/*.slt`, run via [sqllogictest](https://github.com/risinglightdb/sqllogictest-rs)) covering query scenarios from simple to deeply nested, with both single and composite primary keys
 
 ## Compatibility
 
-- **DataFusion**: 52.x
-- **Rust**: 1.75+ (MSRV)
+- **DataFusion**: 54.x
+- **Rust**: 1.88+ (MSRV)
 - **Arrow**: Compatible with DataFusion's Arrow version
 
 ## Architecture Details

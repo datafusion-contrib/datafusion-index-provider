@@ -1,0 +1,239 @@
+# Employee table (single UInt64 primary key), parallel union mode.
+#
+# id | name    | age | department
+# ---+---------+-----+------------
+# 1  | Alice   | 25  | Engineering
+# 2  | Bob     | 30  | Sales
+# 3  | Charlie | 35  | Marketing
+# 4  | David   | 28  | Engineering
+# 5  | Eve     | 32  | Sales
+
+# --- single index: equality on age ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 25
+----
+1 Alice 25 Engineering
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 30
+----
+2 Bob 30 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 35
+----
+3 Charlie 35 Marketing
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 28
+----
+4 David 28 Engineering
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 32
+----
+5 Eve 32 Sales
+
+# --- single index: range on age ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age > 30
+----
+3 Charlie 35 Marketing
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age < 30
+----
+1 Alice 25 Engineering
+4 David 28 Engineering
+
+# --- single index: equality on department ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE department = 'Sales'
+----
+2 Bob 30 Sales
+5 Eve 32 Sales
+
+# --- AND intersection ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age > 30 AND department = 'Engineering'
+----
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age <= 30 AND department = 'Engineering'
+----
+1 Alice 25 Engineering
+4 David 28 Engineering
+
+# --- OR union ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age <= 30 OR department = 'Engineering'
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+4 David 28 Engineering
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 25 OR age = 35 OR age = 32
+----
+1 Alice 25 Engineering
+3 Charlie 35 Marketing
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age < 30 OR age > 30
+----
+1 Alice 25 Engineering
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 25 OR age < 29
+----
+1 Alice 25 Engineering
+4 David 28 Engineering
+
+# --- mixed AND / OR ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE (age < 30 AND department = 'Engineering') OR (age > 30 AND department = 'Sales')
+----
+1 Alice 25 Engineering
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age = 25 OR age = 28)
+    AND
+    department = 'Engineering'
+    AND
+    age < 40
+    AND
+    age > 20
+----
+1 Alice 25 Engineering
+4 David 28 Engineering
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (
+        (age >= 25 AND age <= 30)
+        AND
+        (department = 'Engineering' OR department = 'Sales')
+    )
+    AND
+    (
+        (age != 27 AND age != 29)
+        OR
+        (department = 'Engineering' AND age < 29)
+    )
+----
+1 Alice 25 Engineering
+4 David 28 Engineering
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age > 30 AND department = 'Engineering') OR department = 'Sales'
+----
+2 Bob 30 Sales
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age >= 25 AND department = 'Engineering') OR
+    (age >= 30 AND department = 'Sales')
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age < 28 AND department = 'Engineering') OR
+    department = 'Sales' OR
+    age = 28
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    ((age > 25 AND age < 35) AND department = 'Engineering') OR
+    (department = 'Sales' OR department = 'Marketing')
+----
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age = 25 AND department = 'Engineering') OR
+    (age > 30 AND department = 'Sales') OR
+    department = 'Marketing'
+----
+1 Alice 25 Engineering
+3 Charlie 35 Marketing
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age >= 25 AND department = 'Engineering') OR
+    (age >= 30 AND department = 'Sales') OR
+    (age >= 28 AND department = 'Marketing')
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age >= 30 AND department = 'Engineering') OR
+    (department = 'Engineering' AND age > 25)
+----
+4 David 28 Engineering
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age = 25 AND department = 'Engineering') OR
+    (age >= 30 AND department = 'Sales') OR
+    department = 'Marketing' OR
+    age = 28
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    ((age > 25 AND age < 30) OR (age > 30 AND age < 35)) AND
+    (department = 'Engineering' OR department = 'Sales')
+----
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    department = 'Engineering' OR
+    department = 'Sales' OR
+    age = 25 OR
+    age = 32
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+4 David 28 Engineering
+5 Eve 32 Sales

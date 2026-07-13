@@ -36,27 +36,31 @@ use std::sync::Arc;
 /// ordering properties of the input execution plans:
 ///
 /// ## Join Algorithm Selection
-/// - **SortMergeJoin**: Used when both inputs are ordered by primary key, providing O(n+m) complexity
-/// - **HashJoin**: Used when inputs are unordered, providing O(n+m) average complexity with O(n) space
+/// - **`SortMergeJoin`**: Used when both inputs are ordered by primary key, providing O(n+m) complexity
+/// - **`HashJoin`**: Used when inputs are unordered, providing O(n+m) average complexity with O(n) space
 ///
 /// ## Performance Characteristics
-/// - **SortMergeJoin**: Memory-efficient streaming join, ideal for large ordered datasets
-/// - **HashJoin**: Builds hash table from left input, efficient for smaller left side
+/// - **`SortMergeJoin`**: Memory-efficient streaming join, ideal for large ordered datasets
+/// - **`HashJoin`**: Builds hash table from left input, efficient for smaller left side
 ///
 /// The join is always an INNER join since the goal is to find primary key values that satisfy
 /// ALL conditions (intersection semantics for AND operations). The join is performed on
 /// all columns in the schema, which collectively form the composite primary key.
 ///
 /// # Arguments
-/// * `left` - Left execution plan producing primary key values (typically becomes hash table in HashJoin)
+/// * `left` - Left execution plan producing primary key values (typically becomes hash table in `HashJoin`)
 /// * `right` - Right execution plan producing primary key values
 ///
 /// # Returns
 /// An execution plan that produces primary key values present in both inputs.
 ///
+/// # Errors
+/// Returns an error if the join columns cannot be resolved from the input schemas
+/// or if the underlying join execution plan fails to build.
+///
 /// # Performance Tips
 /// For optimal performance:
-/// - Place the more selective index scan on the left side for HashJoin
+/// - Place the more selective index scan on the left side for `HashJoin`
 /// - Ensure primary key columns are properly typed and indexed
 /// - Consider the memory vs. CPU trade-offs between join algorithms
 pub fn try_create_index_lookup_join(
@@ -116,6 +120,7 @@ pub fn try_create_index_lookup_join(
             None,
             PartitionMode::CollectLeft,
             NullEquality::NullEqualsNull,
+            false,
         )?)),
     }
 }
@@ -125,18 +130,16 @@ mod tests {
     use super::*;
     use crate::physical_plan::create_plan_properties_for_pk_scan;
     use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-    use datafusion::common::Statistics;
     use datafusion::execution::context::TaskContext;
     use datafusion::execution::SendableRecordBatchStream;
 
     use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
-    use std::any::Any;
     use std::fmt;
 
     /// A mock execution plan that can be configured to be ordered or not.
     #[derive(Debug)]
     struct MockExec {
-        plan_properties: PlanProperties,
+        plan_properties: Arc<PlanProperties>,
         schema: SchemaRef,
     }
 
@@ -144,7 +147,7 @@ mod tests {
         fn new(ordered: bool) -> Self {
             let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::UInt64, false)]));
 
-            let plan_properties = create_plan_properties_for_pk_scan(schema.clone(), ordered);
+            let plan_properties = create_plan_properties_for_pk_scan(&schema, ordered);
 
             Self {
                 plan_properties,
@@ -160,19 +163,15 @@ mod tests {
     }
 
     impl ExecutionPlan for MockExec {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "MockExec"
-        }
-
-        fn as_any(&self) -> &dyn Any {
-            self
         }
 
         fn schema(&self) -> SchemaRef {
             self.schema.clone()
         }
 
-        fn properties(&self) -> &PlanProperties {
+        fn properties(&self) -> &Arc<PlanProperties> {
             &self.plan_properties
         }
 
@@ -192,10 +191,6 @@ mod tests {
             _partition: usize,
             _context: Arc<TaskContext>,
         ) -> Result<SendableRecordBatchStream> {
-            unimplemented!()
-        }
-
-        fn statistics(&self) -> Result<Statistics> {
             unimplemented!()
         }
     }

@@ -17,12 +17,11 @@
 
 //! Sequential union execution plan that processes inputs without spawning tasks.
 //!
-//! This module provides [`SequentialUnionExec`], an alternative to DataFusion's
+//! This module provides [`SequentialUnionExec`], an alternative to `DataFusion`'s
 //! [`UnionExec`](datafusion::physical_plan::union::UnionExec) that reports a single partition and processes all input partitions
 //! sequentially. This avoids the task spawning that occurs when `CoalescePartitionsExec`
 //! is inserted for multi-partition plans.
 
-use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -42,7 +41,7 @@ use futures::Stream;
 
 /// A union execution plan that processes all inputs sequentially in a single partition.
 ///
-/// Unlike DataFusion's [`UnionExec`](datafusion::physical_plan::union::UnionExec) which reports N partitions for N inputs (causing
+/// Unlike `DataFusion`'s [`UnionExec`](datafusion::physical_plan::union::UnionExec) which reports N partitions for N inputs (causing
 /// `CoalescePartitionsExec` to be inserted and spawn Tokio tasks), this operator
 /// always reports exactly 1 partition and chains all input partition streams sequentially.
 ///
@@ -62,7 +61,7 @@ pub struct SequentialUnionExec {
     /// Schema of the output (validated to match all inputs)
     schema: SchemaRef,
     /// Cached plan properties
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl SequentialUnionExec {
@@ -72,7 +71,10 @@ impl SequentialUnionExec {
     /// * `inputs` - Execution plans to union. Must be non-empty and have compatible schemas.
     ///
     /// # Returns
-    /// A new `SequentialUnionExec` or an error if:
+    /// A new `SequentialUnionExec`.
+    ///
+    /// # Errors
+    /// Returns an error if:
     /// - `inputs` is empty
     /// - Input schemas are incompatible
     pub fn try_new(inputs: Vec<Arc<dyn ExecutionPlan>>) -> Result<Self> {
@@ -102,12 +104,12 @@ impl SequentialUnionExec {
             .collect();
         let eq_properties = calculate_union(children_eqps, Arc::clone(&schema))?;
 
-        let properties = PlanProperties::new(
+        let properties = Arc::new(PlanProperties::new(
             eq_properties,
             Partitioning::UnknownPartitioning(1), // KEY: Always 1 partition
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             inputs,
@@ -120,10 +122,9 @@ impl SequentialUnionExec {
 impl DisplayAs for SequentialUnionExec {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match t {
-            DisplayFormatType::Default | DisplayFormatType::Verbose => {
-                write!(f, "SequentialUnionExec")
-            }
-            DisplayFormatType::TreeRender => {
+            DisplayFormatType::Default
+            | DisplayFormatType::Verbose
+            | DisplayFormatType::TreeRender => {
                 write!(f, "SequentialUnionExec")
             }
         }
@@ -131,15 +132,11 @@ impl DisplayAs for SequentialUnionExec {
 }
 
 impl ExecutionPlan for SequentialUnionExec {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "SequentialUnionExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 

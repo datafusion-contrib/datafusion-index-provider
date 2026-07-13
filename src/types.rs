@@ -37,7 +37,7 @@ use std::fmt;
 /// ## Execution Plan Mapping
 /// Each variant maps to a specific execution strategy:
 /// - `Single`: Direct index scan via `IndexScanExec`
-/// - `And`: Index intersection via cascaded joins (Hash or SortMerge joins)
+/// - `And`: Index intersection via cascaded joins (Hash or `SortMerge` joins)
 /// - `Or`: Index union via `UnionExec` + `AggregateExec` for deduplication
 #[derive(Debug, Clone)]
 pub enum IndexFilter {

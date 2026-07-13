@@ -1,7 +1,7 @@
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use datafusion::arrow::array::{Int32Array, StringArray};
+use datafusion::arrow::array::{Int32Array, StringArray, UInt64Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -45,6 +45,8 @@ impl EmployeeTableProvider {
         ]));
 
         let id_array = Int32Array::from(vec![1, 2, 3, 4, 5]);
+        // Row identifiers matching the index schema's UInt64 primary key column.
+        let pk_ids = UInt64Array::from(vec![1u64, 2, 3, 4, 5]);
         let name_array = StringArray::from(vec!["Alice", "Bob", "Charlie", "David", "Eve"]);
         let age_array = Int32Array::from(vec![25, 30, 35, 28, 32]);
         let department_array = StringArray::from(vec![
@@ -68,8 +70,8 @@ impl EmployeeTableProvider {
 
         EmployeeTableProvider {
             schema,
-            age_index: Arc::new(AgeIndex::new(&age_array, &id_array)),
-            department_index: Arc::new(DepartmentIndex::new(&department_array, &id_array)),
+            age_index: Arc::new(AgeIndex::new(&age_array, &pk_ids)),
+            department_index: Arc::new(DepartmentIndex::new(&department_array, &pk_ids)),
             mapper: Arc::new(BatchMapper::new(vec![batch])),
             union_mode: UnionMode::Parallel,
         }
@@ -85,10 +87,6 @@ impl EmployeeTableProvider {
 
 #[async_trait]
 impl TableProvider for EmployeeTableProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
@@ -107,9 +105,7 @@ impl TableProvider for EmployeeTableProvider {
         let (indexed_filters, remaining_filters) = self.analyze_and_optimize_filters(filters)?;
 
         if indexed_filters.is_empty() {
-            return self
-                .scan_with_table(state, projection, &remaining_filters, limit)
-                .await;
+            return self.scan_with_table(state, projection, &remaining_filters, limit);
         }
 
         self.scan_with_indexes(
@@ -119,7 +115,6 @@ impl TableProvider for EmployeeTableProvider {
             limit,
             &indexed_filters,
         )
-        .await
     }
 
     fn supports_filters_pushdown(
@@ -142,7 +137,7 @@ impl IndexedTableProvider for EmployeeTableProvider {
 }
 
 impl EmployeeTableProvider {
-    async fn scan_with_indexes(
+    fn scan_with_indexes(
         &self,
         _state: &dyn Session,
         _projection: Option<&Vec<usize>>,
@@ -159,10 +154,10 @@ impl EmployeeTableProvider {
         )?))
     }
 
-    /// Builds an ExecutionPlan to scan the table.
+    /// Builds an `ExecutionPlan` to scan the table.
     /// This is the main entry point for scanning the table without indexes.
     /// It is designed to be called by `scan_with_indexes_or_fallback`.
-    async fn scan_with_table(
+    fn scan_with_table(
         &self,
         _state: &dyn Session,
         _projection: Option<&Vec<usize>>,

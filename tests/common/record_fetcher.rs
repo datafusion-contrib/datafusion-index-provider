@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use datafusion::arrow::array::{Array, Int32Array, UInt64Array};
+use datafusion::arrow::array::{Array, UInt64Array};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::Result;
@@ -41,7 +41,7 @@ impl RecordFetcher for BatchMapper {
             .as_any()
             .downcast_ref::<UInt64Array>()
             .unwrap();
-        let row_ids: Vec<usize> = indices.iter().flatten().map(|i| i as usize).collect();
+        let row_ids: Vec<u64> = indices.iter().flatten().collect();
 
         log::debug!("Row ids: {row_ids:?}");
 
@@ -49,15 +49,17 @@ impl RecordFetcher for BatchMapper {
     }
 }
 
-fn apply_row_filter(batch: &RecordBatch, row_ids: &[usize]) -> Result<RecordBatch> {
+fn apply_row_filter(batch: &RecordBatch, row_ids: &[u64]) -> Result<RecordBatch> {
     log::debug!("Row ids: {row_ids:?}");
+    // Convert 1-based primary keys to 0-based row positions for arrow `take`.
+    let indices = UInt64Array::from_iter_values(row_ids.iter().map(|&i| i - 1));
     let new_columns: Result<Vec<Arc<dyn Array>>> = batch
         .columns()
         .iter()
         .map(|col| {
             Ok(Arc::new(datafusion::arrow::compute::take(
                 col.as_ref(),
-                &Int32Array::from_iter_values(row_ids.iter().map(|&i| (i - 1) as i32)),
+                &indices,
                 None,
             )?) as Arc<dyn Array>)
         })

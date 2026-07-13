@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -28,7 +27,7 @@ pub fn composite_pk_schema() -> SchemaRef {
     ])
 }
 
-/// A multi-tenant employee table with composite PK (tenant_id, employee_id)
+/// A multi-tenant employee table with composite PK (`tenant_id`, `employee_id`)
 ///
 /// | tenant_id | employee_id | name    | age | department  |
 /// |-----------|-------------|---------|-----|-------------|
@@ -108,10 +107,6 @@ impl MultiTenantEmployeeProvider {
 
 #[async_trait]
 impl TableProvider for MultiTenantEmployeeProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }

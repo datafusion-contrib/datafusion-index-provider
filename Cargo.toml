@@ -10,19 +10,25 @@ documentation = "https://docs.rs/datafusion-index-provider"
 keywords = ["datafusion", "index", "database", "query", "analytics"]
 categories = ["database", "data-structures"]
 readme = "README.md"
-rust-version = "1.75"
+rust-version = "1.88"
 
 [dependencies]
 async-trait = "0.1.89"
-datafusion = { version = "52.1.0", default-features = false }
-datafusion-common = { version = "52.1.0", default-features = false }
+datafusion = { version = "54.0.0", default-features = false }
+datafusion-common = { version = "54.0.0", default-features = false }
 futures = "0.3.32"
 futures-util = "0.3.32"
 futures-core = "0.3.32"
-log = "0.4.29"
+log = "0.4.33"
 
 [dev-dependencies]
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
-env_logger = "0.11.9"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
+env_logger = "0.11.11"
 parking_lot = "0.12.5"
-datafusion = { version = "52.1.0", default-features = false, features = ["sql"] }
+datafusion = { version = "54.0.0", default-features = false, features = ["sql"] }
+datafusion-sqllogictest = { version = "54.0.0", default-features = false }
+sqllogictest = "0.29"
+indicatif = "0.18"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }

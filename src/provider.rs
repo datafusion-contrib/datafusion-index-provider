@@ -38,6 +38,9 @@ use std::sync::Arc;
 pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// Returns a list of all indexes available for this table.
     /// This is the only method that must be implemented by the user.
+    ///
+    /// # Errors
+    /// Returns an error if the list of indexes cannot be produced.
     fn indexes(&self) -> Result<Vec<Arc<dyn Index>>>;
 
     /// Analyzes filters, optimizes them, and groups them by the index that can handle them.
@@ -51,6 +54,9 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// - A list of `IndexFilter`s, where each element is a struct containing an index and a list of
     ///   expressions that can be handled by that index.
     /// - A list of expressions that cannot be handled by any index.
+    ///
+    /// # Errors
+    /// Returns an error if any filter expression cannot be analyzed against the indexes.
     fn analyze_and_optimize_filters(&self, filters: &[Expr]) -> Result<(IndexFilters, Vec<Expr>)> {
         let (indexed_filters, remaining_filters): (Vec<_>, Vec<_>) = filters
             .iter()
@@ -80,6 +86,9 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// This method traverses the expression tree and attempts to create a corresponding
     /// tree of `IndexFilter`s. If any part of the expression cannot be handled by an
     /// index, this method returns `Ok(None)`.
+    ///
+    /// # Errors
+    /// Returns an error if an index fails to evaluate whether it supports the expression.
     fn build_index_filter(&self, expr: &Expr) -> Result<Option<IndexFilter>> {
         // Recursive step for AND/OR operators.
         if let Expr::BinaryExpr(be) = expr {
@@ -99,10 +108,9 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
             // If both sides are indexable, combine them.
             if let (Some(l), Some(r)) = (l_filter, r_filter) {
                 return op(l, r);
-            } else {
-                // One or both sides are not indexable, so the whole expression is not.
-                return Ok(None);
             }
+            // One or both sides are not indexable, so the whole expression is not.
+            return Ok(None);
         }
 
         // Base case for simple expressions (not AND/OR).
@@ -110,6 +118,10 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     }
 
     /// Finds a suitable index for a simple expression.
+    ///
+    /// # Errors
+    /// Returns an error if the indexes cannot be listed or an index fails to evaluate
+    /// whether it supports the expression.
     fn find_index_for_expr(&self, expr: &Expr) -> Result<Option<IndexFilter>> {
         for index in self.indexes()? {
             if index.supports_predicate(expr)? {
@@ -125,7 +137,7 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// Returns the union mode to use for OR conditions in index scans.
     ///
     /// # Default implementation
-    /// Returns [`UnionMode::Parallel`], which uses DataFusion's standard `UnionExec`
+    /// Returns [`UnionMode::Parallel`], which uses `DataFusion`'s standard `UnionExec`
     /// and may spawn Tokio tasks for parallel execution.
     ///
     /// # When to override
@@ -143,6 +155,10 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// The default implementation returns `TableProviderFilterPushDown::Exact` for any filter
     /// that is supported by at least one index, and `TableProviderFilterPushDown::Unsupported`
     /// otherwise.
+    ///
+    /// # Errors
+    /// Returns an error if the indexes cannot be listed or an index fails to evaluate
+    /// whether it supports a filter.
     fn supports_filters_index_pushdown(
         &self,
         filters: &[&Expr],
@@ -219,7 +235,7 @@ mod tests {
             self
         }
 
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "mock_index"
         }
 
@@ -262,10 +278,6 @@ mod tests {
 
     #[async_trait]
     impl TableProvider for MockTableProvider {
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
         fn schema(&self) -> SchemaRef {
             Arc::new(Schema::new(vec![
                 Field::new("a", DataType::Int32, false),

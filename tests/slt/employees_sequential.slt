@@ -1,0 +1,38 @@
+# Employee table (single UInt64 primary key), sequential union mode.
+# Exercises SequentialUnionExec for OR conditions (same results as parallel).
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 25 OR age = 35
+----
+1 Alice 25 Engineering
+3 Charlie 35 Marketing
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 25 OR age = 30 OR age = 35
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 25 OR department = 'Sales'
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age >= 25 AND department = 'Engineering') OR
+    (age >= 30 AND department = 'Sales')
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 25 OR age < 29
+----
+1 Alice 25 Engineering
+4 David 28 Engineering

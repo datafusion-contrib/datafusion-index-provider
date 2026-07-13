@@ -16,17 +16,17 @@ use employee_provider::EmployeeTableProvider;
 use std::sync::Arc;
 
 /// Helper function to setup test environment with parallel union mode (default).
-pub async fn setup_test_env() -> SessionContext {
-    setup_test_env_with_mode(UnionMode::Parallel).await
+pub fn setup_test_env() -> SessionContext {
+    setup_test_env_with_mode(UnionMode::Parallel)
 }
 
 /// Helper function to setup test environment with sequential union mode.
-pub async fn setup_test_env_sequential() -> SessionContext {
-    setup_test_env_with_mode(UnionMode::Sequential).await
+pub fn setup_test_env_sequential() -> SessionContext {
+    setup_test_env_with_mode(UnionMode::Sequential)
 }
 
 /// Helper function to setup test environment with a specific union mode.
-async fn setup_test_env_with_mode(mode: UnionMode) -> SessionContext {
+fn setup_test_env_with_mode(mode: UnionMode) -> SessionContext {
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
         .is_test(true)
@@ -41,12 +41,12 @@ async fn setup_test_env_with_mode(mode: UnionMode) -> SessionContext {
 }
 
 /// Helper function to setup composite PK test environment with parallel union mode (default).
-pub async fn setup_composite_pk_test_env() -> SessionContext {
-    setup_composite_pk_test_env_with_mode(UnionMode::Parallel).await
+pub fn setup_composite_pk_test_env() -> SessionContext {
+    setup_composite_pk_test_env_with_mode(UnionMode::Parallel)
 }
 
 /// Helper function to setup composite PK test environment with a specific union mode.
-async fn setup_composite_pk_test_env_with_mode(mode: UnionMode) -> SessionContext {
+fn setup_composite_pk_test_env_with_mode(mode: UnionMode) -> SessionContext {
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
         .is_test(true)
