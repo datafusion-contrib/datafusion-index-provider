@@ -200,9 +200,6 @@ struct EmployeeTable {
 
 #[async_trait]
 impl TableProvider for EmployeeTable {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }

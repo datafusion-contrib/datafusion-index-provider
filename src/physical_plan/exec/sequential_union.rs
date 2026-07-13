@@ -22,7 +22,6 @@
 //! sequentially. This avoids the task spawning that occurs when `CoalescePartitionsExec`
 //! is inserted for multi-partition plans.
 
-use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -62,7 +61,7 @@ pub struct SequentialUnionExec {
     /// Schema of the output (validated to match all inputs)
     schema: SchemaRef,
     /// Cached plan properties
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl SequentialUnionExec {
@@ -102,12 +101,12 @@ impl SequentialUnionExec {
             .collect();
         let eq_properties = calculate_union(children_eqps, Arc::clone(&schema))?;
 
-        let properties = PlanProperties::new(
+        let properties = Arc::new(PlanProperties::new(
             eq_properties,
             Partitioning::UnknownPartitioning(1), // KEY: Always 1 partition
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             inputs,
@@ -135,11 +134,7 @@ impl ExecutionPlan for SequentialUnionExec {
         "SequentialUnionExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 

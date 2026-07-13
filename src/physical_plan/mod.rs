@@ -44,7 +44,7 @@ use std::sync::Arc;
 /// # Arguments
 /// * `schema` - The schema of the output plan. All columns are treated as primary key columns.
 /// * `ordered` - Whether the output is ordered by the primary key columns.
-pub fn create_plan_properties_for_pk_scan(schema: SchemaRef, ordered: bool) -> PlanProperties {
+pub fn create_plan_properties_for_pk_scan(schema: SchemaRef, ordered: bool) -> Arc<PlanProperties> {
     let mut eq_properties = EquivalenceProperties::new(schema.clone());
     if ordered {
         let sort_exprs: Vec<PhysicalSortExpr> = schema
@@ -57,12 +57,12 @@ pub fn create_plan_properties_for_pk_scan(schema: SchemaRef, ordered: bool) -> P
             .collect();
         eq_properties.add_ordering(sort_exprs);
     }
-    PlanProperties::new(
+    Arc::new(PlanProperties::new(
         eq_properties,
         Partitioning::RoundRobinBatch(1),
         EmissionType::Incremental,
         Boundedness::Bounded,
-    )
+    ))
 }
 
 /// Creates a schema for an index with the specified fields.

@@ -55,7 +55,7 @@ pub struct IndexScanExec {
     /// The limit to apply to the index.
     limit: Option<usize>,
     /// Properties of the plan.
-    plan_properties: PlanProperties,
+    plan_properties: Arc<PlanProperties>,
 }
 
 impl DisplayAs for IndexScanExec {
@@ -87,14 +87,8 @@ impl ExecutionPlan for IndexScanExec {
         "IndexScanExec"
     }
 
-    /// Return a reference to the logical plan as [`std::any::Any`] so that it can be
-    /// downcast to a specific implementation.
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     /// Get the properties for this execution plan
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.plan_properties
     }
 
@@ -165,12 +159,12 @@ impl IndexScanExec {
         };
         let eq = EquivalenceProperties::new_with_orderings(schema.clone(), [ordering]);
 
-        let plan_properties = PlanProperties::new(
+        let plan_properties = Arc::new(PlanProperties::new(
             eq,
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             index,

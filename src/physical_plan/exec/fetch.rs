@@ -15,11 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
-use datafusion::common::Statistics;
 use datafusion::error::{DataFusionError, Result};
 use datafusion::execution::context::TaskContext;
 use datafusion::execution::SendableRecordBatchStream;
@@ -61,7 +59,7 @@ use datafusion::physical_plan::PhysicalExpr;
 pub struct RecordFetchExec {
     indexes: Arc<IndexFilters>,
     limit: Option<usize>,
-    plan_properties: PlanProperties,
+    plan_properties: Arc<PlanProperties>,
     record_fetcher: Arc<dyn RecordFetcher>,
     /// The input plan that produces the row IDs.
     input: Arc<dyn ExecutionPlan>,
@@ -108,12 +106,12 @@ impl RecordFetchExec {
             }
         };
         let eq_properties = EquivalenceProperties::new(schema.clone());
-        let plan_properties = PlanProperties::new(
+        let plan_properties = Arc::new(PlanProperties::new(
             eq_properties,
             Partitioning::UnknownPartitioning(1),
             input.properties().emission_type,
             input.properties().boundedness,
-        );
+        ));
 
         Ok(Self {
             indexes: indexes.into(),
@@ -353,19 +351,13 @@ impl ExecutionPlan for RecordFetchExec {
         "RecordFetchExec"
     }
 
-    /// Return a reference to the logical plan as [`Any`] so that it can be
-    /// downcast to a specific implementation.
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     /// Get the schema of this execution plan
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
 
     /// Get the properties for this execution plan
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.plan_properties
     }
 
@@ -422,11 +414,6 @@ impl ExecutionPlan for RecordFetchExec {
             self.record_fetcher.clone(),
             baseline_metrics,
         )))
-    }
-
-    /// Get the statistics for this execution plan.
-    fn statistics(&self) -> Result<Statistics> {
-        Ok(Statistics::new_unknown(&self.schema()))
     }
 }
 
@@ -1049,11 +1036,7 @@ mod tests {
 
         // The input plan should be a ProjectionExec wrapping a HashJoinExec
         assert_eq!(exec.input.name(), "ProjectionExec");
-        let projection = exec
-            .input
-            .as_any()
-            .downcast_ref::<ProjectionExec>()
-            .unwrap();
+        let projection = exec.input.downcast_ref::<ProjectionExec>().unwrap();
         assert_eq!(projection.children()[0].name(), "HashJoinExec");
         Ok(())
     }
@@ -1086,7 +1069,7 @@ mod tests {
         assert_eq!(exec.input.name(), "ProjectionExec");
 
         fn count_joins(plan: &Arc<dyn ExecutionPlan>) -> usize {
-            if let Some(join_exec) = plan.as_any().downcast_ref::<HashJoinExec>() {
+            if let Some(join_exec) = plan.downcast_ref::<HashJoinExec>() {
                 1 + count_joins(join_exec.children()[0]) + count_joins(join_exec.children()[1])
             } else {
                 plan.children().iter().map(|c| count_joins(c)).sum()

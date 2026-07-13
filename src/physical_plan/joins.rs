@@ -116,6 +116,7 @@ pub fn try_create_index_lookup_join(
             None,
             PartitionMode::CollectLeft,
             NullEquality::NullEqualsNull,
+            false,
         )?)),
     }
 }
@@ -125,18 +126,16 @@ mod tests {
     use super::*;
     use crate::physical_plan::create_plan_properties_for_pk_scan;
     use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-    use datafusion::common::Statistics;
     use datafusion::execution::context::TaskContext;
     use datafusion::execution::SendableRecordBatchStream;
 
     use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
-    use std::any::Any;
     use std::fmt;
 
     /// A mock execution plan that can be configured to be ordered or not.
     #[derive(Debug)]
     struct MockExec {
-        plan_properties: PlanProperties,
+        plan_properties: Arc<PlanProperties>,
         schema: SchemaRef,
     }
 
@@ -164,15 +163,11 @@ mod tests {
             "MockExec"
         }
 
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-
         fn schema(&self) -> SchemaRef {
             self.schema.clone()
         }
 
-        fn properties(&self) -> &PlanProperties {
+        fn properties(&self) -> &Arc<PlanProperties> {
             &self.plan_properties
         }
 
@@ -192,10 +187,6 @@ mod tests {
             _partition: usize,
             _context: Arc<TaskContext>,
         ) -> Result<SendableRecordBatchStream> {
-            unimplemented!()
-        }
-
-        fn statistics(&self) -> Result<Statistics> {
             unimplemented!()
         }
     }
