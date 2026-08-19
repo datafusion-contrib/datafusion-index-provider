@@ -283,7 +283,13 @@ impl RecordFetchExec {
                     canonical_schema,
                 )?;
 
-                Ok(Arc::new(agg_exec))
+                let res: Arc<dyn ExecutionPlan> = Arc::new(agg_exec);
+
+                Ok(if let Some(limit) = limit {
+                    Arc::new(LocalLimitExec::new(res, limit))
+                } else {
+                    res
+                })
             }
         }
     }
