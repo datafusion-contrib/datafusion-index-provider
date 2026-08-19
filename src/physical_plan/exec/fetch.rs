@@ -45,6 +45,7 @@ use crate::types::{IndexFilter, IndexFilters, UnionMode};
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
 use datafusion::physical_plan::empty::EmptyExec;
 use datafusion::physical_plan::expressions::Column;
+use datafusion::physical_plan::limit::LocalLimitExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::union::UnionExec;
 use datafusion::physical_plan::PhysicalExpr;
@@ -208,7 +209,7 @@ impl RecordFetchExec {
             IndexFilter::And(filters) => {
                 let mut plans = filters
                     .iter()
-                    .map(|f| Self::build_scan_exec(f, limit, union_mode))
+                    .map(|f| Self::build_scan_exec(f, None, union_mode))
                     .collect::<Result<Vec<_>>>()?;
 
                 if plans.is_empty() {
@@ -224,7 +225,12 @@ impl RecordFetchExec {
                     let joined = try_create_index_lookup_join(left, right)?;
                     left = Self::project_to_pk_schema(joined, &pk_schema)?;
                 }
-                Ok(left)
+
+                Ok(if let Some(limit) = limit {
+                    Arc::new(LocalLimitExec::new(left, limit))
+                } else {
+                    left
+                })
             }
             IndexFilter::Or(filters) => {
                 let original_plans = filters
