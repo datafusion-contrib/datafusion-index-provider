@@ -45,6 +45,7 @@ use crate::types::{IndexFilter, IndexFilters, UnionMode};
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
 use datafusion::physical_plan::empty::EmptyExec;
 use datafusion::physical_plan::expressions::Column;
+use datafusion::physical_plan::limit::LocalLimitExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::union::UnionExec;
 use datafusion::physical_plan::PhysicalExpr;
@@ -208,7 +209,7 @@ impl RecordFetchExec {
             IndexFilter::And(filters) => {
                 let mut plans = filters
                     .iter()
-                    .map(|f| Self::build_scan_exec(f, limit, union_mode))
+                    .map(|f| Self::build_scan_exec(f, None, union_mode))
                     .collect::<Result<Vec<_>>>()?;
 
                 if plans.is_empty() {
@@ -224,7 +225,12 @@ impl RecordFetchExec {
                     let joined = try_create_index_lookup_join(left, right)?;
                     left = Self::project_to_pk_schema(joined, &pk_schema)?;
                 }
-                Ok(left)
+
+                Ok(if let Some(limit) = limit {
+                    Arc::new(LocalLimitExec::new(left, limit))
+                } else {
+                    left
+                })
             }
             IndexFilter::Or(filters) => {
                 let original_plans = filters
@@ -277,7 +283,13 @@ impl RecordFetchExec {
                     canonical_schema,
                 )?;
 
-                Ok(Arc::new(agg_exec))
+                let res: Arc<dyn ExecutionPlan> = Arc::new(agg_exec);
+
+                Ok(if let Some(limit) = limit {
+                    Arc::new(LocalLimitExec::new(res, limit))
+                } else {
+                    res
+                })
             }
         }
     }
@@ -577,6 +589,7 @@ mod tests {
     use datafusion::physical_plan::memory::MemoryStream;
     use datafusion::prelude::SessionContext;
     use std::any::Any;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use std::time::Duration;
 
@@ -652,45 +665,63 @@ mod tests {
             }
         }
 
-        fn with_data(self) -> impl RecordFetcher {
-            #[derive(Debug)]
-            struct MockFetcherWithData {
-                schema: SchemaRef,
-            }
-
-            #[async_trait]
-            impl RecordFetcher for MockFetcherWithData {
-                fn schema(&self) -> SchemaRef {
-                    self.schema.clone()
-                }
-
-                async fn fetch(&self, index_batch: RecordBatch) -> Result<RecordBatch> {
-                    let row_ids = index_batch
-                        .column_by_name(PK_COL)
-                        .unwrap()
-                        .as_any()
-                        .downcast_ref::<UInt64Array>()
-                        .unwrap();
-
-                    let names: Vec<_> = row_ids
-                        .values()
-                        .iter()
-                        .map(|id| format!("name_{id}"))
-                        .collect();
-
-                    Ok(RecordBatch::try_new(
-                        self.schema.clone(),
-                        vec![
-                            Arc::new(row_ids.clone()),
-                            Arc::new(StringArray::from(names)),
-                        ],
-                    )?)
-                }
-            }
-
+        fn with_data(self) -> MockFetcherWithData {
             MockFetcherWithData {
                 schema: self.schema,
+                rows: AtomicUsize::new(0),
+                calls: AtomicUsize::new(0),
             }
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockFetcherWithData {
+        schema: SchemaRef,
+        rows: AtomicUsize,
+        calls: AtomicUsize,
+    }
+
+    impl MockFetcherWithData {
+        fn rows_fetched(&self) -> usize {
+            self.rows.load(Ordering::SeqCst)
+        }
+
+        fn fetch_calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl RecordFetcher for MockFetcherWithData {
+        fn schema(&self) -> SchemaRef {
+            self.schema.clone()
+        }
+
+        async fn fetch(&self, index_batch: RecordBatch) -> Result<RecordBatch> {
+            self.rows
+                .fetch_add(index_batch.num_rows(), Ordering::SeqCst);
+            self.calls.fetch_add(1, Ordering::SeqCst);
+
+            let row_ids = index_batch
+                .column_by_name(PK_COL)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap();
+
+            let names: Vec<_> = row_ids
+                .values()
+                .iter()
+                .map(|id| format!("name_{id}"))
+                .collect();
+
+            Ok(RecordBatch::try_new(
+                self.schema.clone(),
+                vec![
+                    Arc::new(row_ids.clone()),
+                    Arc::new(StringArray::from(names)),
+                ],
+            )?)
         }
     }
 
@@ -1261,6 +1292,114 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), DataFusionError::Execution(_)));
 
+        Ok(())
+    }
+
+    fn limit_index_batches(idx: Vec<Vec<u64>>) -> Result<Vec<IndexFilter>> {
+        let res = idx
+            .into_iter()
+            .map(|idx| {
+                RecordBatch::try_from_iter(vec![(PK_COL, Arc::new(UInt64Array::from(idx)) as _)])
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|idx| IndexFilter::Single {
+                index: Arc::new(MockIndex::new(vec![idx])),
+                filter: col("a").eq(lit(1)),
+            })
+            .collect();
+
+        Ok(res)
+    }
+
+    /// Ensure `LocalLimitExec` works for OR
+    #[tokio::test]
+    async fn test_or_limit_bounds_rows_reaching_fetch() -> Result<()> {
+        let indexes = vec![IndexFilter::Or(limit_index_batches(vec![
+            vec![1, 2, 3, 4, 5],
+            vec![6, 7, 8, 9, 10],
+        ])?)];
+
+        let fetcher = Arc::new(MockRecordFetcher::new().with_data());
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(
+            indexes,
+            Some(3),
+            fetcher.clone(),
+            schema,
+            UnionMode::Sequential,
+        )?;
+
+        let task_ctx = Arc::new(TaskContext::default());
+        let mut stream = exec.execute(0, task_ctx)?;
+        let mut returned = 0;
+        while let Some(batch) = stream.next().await {
+            returned += batch?.num_rows();
+        }
+
+        assert_eq!(fetcher.rows_fetched(), 3);
+        assert_eq!(returned, 3);
+        Ok(())
+    }
+
+    /// Ensure `LocalLimitExec` works for AND
+    #[tokio::test]
+    async fn test_and_limit_bounds_rows_reaching_fetch() -> Result<()> {
+        let indexes = vec![IndexFilter::And(limit_index_batches(vec![
+            vec![1, 2, 3, 4, 5],
+            vec![1, 2, 3, 4, 5],
+        ])?)];
+
+        let fetcher = Arc::new(MockRecordFetcher::new().with_data());
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(
+            indexes,
+            Some(2),
+            fetcher.clone(),
+            schema,
+            UnionMode::Parallel,
+        )?;
+
+        let task_ctx = Arc::new(TaskContext::default());
+        let mut stream = exec.execute(0, task_ctx)?;
+        let mut returned = 0;
+        while let Some(batch) = stream.next().await {
+            returned += batch?.num_rows();
+        }
+
+        assert_eq!(fetcher.rows_fetched(), 2);
+        assert_eq!(returned, 2);
+        Ok(())
+    }
+
+    /// Ensure that no `LocalLimitExec` are applied when no limits for OR
+    #[tokio::test]
+    async fn test_no_limit_fetches_everything() -> Result<()> {
+        let indexes = vec![IndexFilter::Or(limit_index_batches(vec![
+            vec![1, 2, 3, 4, 5],
+            vec![6, 7, 8, 9, 10],
+        ])?)];
+
+        let fetcher = Arc::new(MockRecordFetcher::new().with_data());
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(
+            indexes,
+            None,
+            fetcher.clone(),
+            schema,
+            UnionMode::Sequential,
+        )?;
+
+        let task_ctx = Arc::new(TaskContext::default());
+        let mut stream = exec.execute(0, task_ctx)?;
+        let mut returned = 0;
+        while let Some(batch) = stream.next().await {
+            returned += batch?.num_rows();
+        }
+
+        assert_eq!(fetcher.rows_fetched(), 10);
+        assert_eq!(returned, 10);
+        assert!(fetcher.fetch_calls() > 0);
         Ok(())
     }
 }

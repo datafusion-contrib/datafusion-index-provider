@@ -1,0 +1,204 @@
+# Employee table (single UInt64 primary key), sequential union mode.
+
+# --- single index: range on age ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age > 30 LIMIT 1
+----
+3 Charlie 35 Marketing
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age < 30 LIMIT 1
+----
+1 Alice 25 Engineering
+
+# --- single index: equality on department ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE department = 'Sales' LIMIT 1
+----
+2 Bob 30 Sales
+
+# --- AND intersection ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age <= 30 AND department = 'Engineering' LIMIT 2
+----
+1 Alice 25 Engineering
+4 David 28 Engineering
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE age < 35 AND age >= 30 LIMIT 1)
+----
+1 1 1 1
+
+# --- OR union ---
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE age <= 30 OR department = 'Engineering' LIMIT 2)
+----
+2 2 2 2
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE age = 25 OR age = 35 OR age = 32 LIMIT 1)
+----
+1 1 1 1
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE age < 30 OR age > 30 LIMIT 3)
+----
+3 3 3 3
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE age = 25 OR age < 29 LIMIT 1)
+----
+1 1 1 1
+
+# --- mixed AND / OR ---
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE (age < 30 AND department = 'Engineering') OR (age > 30 AND department = 'Sales') LIMIT 2)
+----
+2 2 2 2
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE (age < 30 AND department = 'Engineering') OR (age > 30 AND department = 'Sales') LIMIT 1)
+----
+1 1 1 1
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    (age = 25 OR age = 28)
+    AND
+    department = 'Engineering'
+    AND
+    age < 40
+    AND
+    age > 20
+    LIMIT 1)
+----
+1 1 1 1
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    (
+        (age >= 25 AND age <= 30)
+        AND
+        (department = 'Engineering' OR department = 'Sales')
+    )
+    AND
+    (
+        (age != 27 AND age != 29)
+        OR
+        (department = 'Engineering' AND age < 29)
+    )
+    LIMIT 1)
+----
+1 1 1 1
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    (age > 30 AND department = 'Engineering') OR department = 'Sales'
+    LIMIT 1)
+----
+1 1 1 1
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    (age >= 25 AND department = 'Engineering') OR
+    (age >= 30 AND department = 'Sales')
+    LIMIT 2)
+----
+2 2 2 2
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    (age < 28 AND department = 'Engineering') OR
+    department = 'Sales' OR
+    age = 28
+    LIMIT 3)
+----
+3 3 3 3
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    ((age > 25 AND age < 35) AND department = 'Engineering') OR
+    (department = 'Sales' OR department = 'Marketing')
+    LIMIT 3)
+----
+3 3 3 3
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    (age = 25 AND department = 'Engineering') OR
+    (age > 30 AND department = 'Sales') OR
+    department = 'Marketing'
+    LIMIT 2)
+----
+2 2 2 2
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    (age >= 25 AND department = 'Engineering') OR
+    (age >= 30 AND department = 'Sales') OR
+    (age >= 28 AND department = 'Marketing')
+    LIMIT 4)
+----
+4 4 4 4
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age >= 30 AND department = 'Engineering') OR
+    (department = 'Engineering' AND age > 25)
+    LIMIT 1
+----
+4 David 28 Engineering
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    (age = 25 AND department = 'Engineering') OR
+    (age >= 30 AND department = 'Sales') OR
+    department = 'Marketing' OR
+    age = 28
+    LIMIT 5
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE
+    ((age > 25 AND age < 30) OR (age > 30 AND age < 35)) AND
+    (department = 'Engineering' OR department = 'Sales')
+    LIMIT 2
+----
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query IIII
+SELECT count(id), count(name), count(age), count(department)
+FROM (SELECT * FROM employees WHERE
+    department = 'Engineering' OR
+    department = 'Sales' OR
+    age = 25 OR
+    age = 32
+    LIMIT 2)
+----
+2 2 2 2

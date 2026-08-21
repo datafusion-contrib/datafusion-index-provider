@@ -27,6 +27,14 @@ pub fn setup_test_env_sequential() -> SessionContext {
 
 /// Helper function to setup test environment with a specific union mode.
 fn setup_test_env_with_mode(mode: UnionMode) -> SessionContext {
+    setup_test_env_with_provider(mode).0
+}
+
+/// Helper function to setup test environment with a specific union mode and returns the provider
+/// along the context.
+pub fn setup_test_env_with_provider(
+    mode: UnionMode,
+) -> (SessionContext, Arc<EmployeeTableProvider>) {
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
         .is_test(true)
@@ -34,10 +42,10 @@ fn setup_test_env_with_mode(mode: UnionMode) -> SessionContext {
 
     let ctx = SessionContext::new();
 
-    let provider = EmployeeTableProvider::new().with_union_mode(mode);
-    ctx.register_table("employees", Arc::new(provider)).unwrap();
+    let provider = Arc::new(EmployeeTableProvider::new().with_union_mode(mode));
+    ctx.register_table("employees", provider.clone()).unwrap();
 
-    ctx
+    (ctx, provider)
 }
 
 /// Helper function to setup composite PK test environment with parallel union mode (default).

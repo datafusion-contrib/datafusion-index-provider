@@ -83,6 +83,12 @@ impl EmployeeTableProvider {
         self.union_mode = mode;
         self
     }
+
+    /// Total number of row fetched.
+    #[allow(dead_code)]
+    pub fn rows_fetched(&self) -> usize {
+        self.mapper.rows_fetched()
+    }
 }
 
 #[async_trait]
