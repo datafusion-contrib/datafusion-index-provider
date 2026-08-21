@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,11 +12,20 @@ use datafusion_index_provider::physical_plan::fetcher::RecordFetcher;
 /// Mapper that filters batches using index results
 pub struct BatchMapper {
     batches: Vec<RecordBatch>,
+    rows_fetched: AtomicUsize,
 }
 
 impl BatchMapper {
     pub fn new(batches: Vec<RecordBatch>) -> Self {
-        Self { batches }
+        Self {
+            batches,
+            rows_fetched: AtomicUsize::new(0),
+        }
+    }
+
+    /// Total number of row fetched.
+    pub fn rows_fetched(&self) -> usize {
+        self.rows_fetched.load(Ordering::SeqCst)
     }
 }
 
@@ -36,6 +46,8 @@ impl RecordFetcher for BatchMapper {
 
     async fn fetch(&self, index_batch: RecordBatch) -> Result<RecordBatch> {
         log::debug!("Index batch: {index_batch:?}");
+        self.rows_fetched
+            .fetch_add(index_batch.num_rows(), Ordering::SeqCst);
         let indices = index_batch
             .column(0)
             .as_any()
