@@ -37,6 +37,7 @@ use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
     Partitioning, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
 };
+use datafusion::common::tree_node::TreeNodeRecursion;
 use futures::Stream;
 
 /// A union execution plan that processes all inputs sequentially in a single partition.
@@ -184,6 +185,16 @@ impl ExecutionPlan for SequentialUnionExec {
             schema: Arc::clone(&self.schema),
         }))
     }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(
+            &Arc<dyn datafusion::physical_plan::PhysicalExpr>,
+        ) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+
 }
 
 /// Stream that sequentially processes partitions from multiple inputs.

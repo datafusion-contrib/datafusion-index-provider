@@ -14,8 +14,8 @@ rust-version = "1.88"
 
 [dependencies]
 async-trait = "0.1.89"
-datafusion = { version = "54.0.0", default-features = false }
-datafusion-common = { version = "54.0.0", default-features = false }
+datafusion = { version = "55.2.0", default-features = false }
+datafusion-common = { version = "55.2.0", default-features = false }
 futures = "0.3.32"
 futures-util = "0.3.32"
 futures-core = "0.3.32"
@@ -25,8 +25,8 @@ log = "0.4.33"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
 env_logger = "0.11.11"
 parking_lot = "0.12.5"
-datafusion = { version = "54.0.0", default-features = false, features = ["sql"] }
-datafusion-sqllogictest = { version = "54.0.0", default-features = false }
+datafusion = { version = "55.2.0", default-features = false, features = ["sql"] }
+datafusion-sqllogictest = { version = "55.2.0", default-features = false }
 sqllogictest = "0.29"
 indicatif = "0.18"
 

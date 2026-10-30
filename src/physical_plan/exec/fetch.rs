@@ -49,6 +49,7 @@ use datafusion::physical_plan::limit::LocalLimitExec;
 use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::union::UnionExec;
 use datafusion::physical_plan::PhysicalExpr;
+use datafusion::common::tree_node::TreeNodeRecursion;
 
 /// Physical plan node for fetching records from a [`RecordFetcher`] using
 /// row IDs produced by one or more index scans.
@@ -435,6 +436,16 @@ impl ExecutionPlan for RecordFetchExec {
             baseline_metrics,
         )))
     }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(
+            &Arc<dyn datafusion::physical_plan::PhysicalExpr>,
+        ) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+
 }
 
 /// A stream that fetches records using row IDs from an input stream.
