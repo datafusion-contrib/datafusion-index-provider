@@ -10,7 +10,7 @@ documentation = "https://docs.rs/datafusion-index-provider"
 keywords = ["datafusion", "index", "database", "query", "analytics"]
 categories = ["database", "data-structures"]
 readme = "README.md"
-rust-version = "1.88"
+rust-version = "1.94.0"
 
 [dependencies]
 async-trait = "0.1.89"

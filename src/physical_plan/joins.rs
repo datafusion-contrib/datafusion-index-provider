@@ -133,9 +133,9 @@ mod tests {
     use datafusion::execution::context::TaskContext;
     use datafusion::execution::SendableRecordBatchStream;
 
+    use datafusion::common::tree_node::TreeNodeRecursion;
     use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
     use std::fmt;
-    use datafusion::common::tree_node::TreeNodeRecursion;
 
     /// A mock execution plan that can be configured to be ordered or not.
     #[derive(Debug)]
