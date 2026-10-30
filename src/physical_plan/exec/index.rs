@@ -27,6 +27,7 @@ use datafusion::physical_plan::{
     execution_plan::EmissionType, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning,
     PlanProperties, SendableRecordBatchStream,
 };
+use datafusion::common::tree_node::TreeNodeRecursion;
 use std::sync::Arc;
 
 /// Physical execution plan for scanning an index to produce row IDs.
@@ -123,6 +124,16 @@ impl ExecutionPlan for IndexScanExec {
 
         self.index.scan(&self.filters, self.limit)
     }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(
+            &Arc<dyn datafusion::physical_plan::PhysicalExpr>,
+        ) -> Result<TreeNodeRecursion, DataFusionError>,
+    ) -> Result<TreeNodeRecursion, DataFusionError> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+
 }
 
 impl IndexScanExec {
