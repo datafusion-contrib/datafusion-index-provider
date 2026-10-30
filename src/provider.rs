@@ -22,8 +22,13 @@ use crate::types::{IndexFilter, IndexFilters, UnionMode};
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::TableProvider;
+use datafusion::common::DFSchema;
 use datafusion::error::Result;
+use datafusion::logical_expr::execution_props::ExecutionProps;
+use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, Operator, TableProviderFilterPushDown};
+use datafusion::physical_expr::create_physical_expr;
+use datafusion::physical_plan::filter::FilterExecBuilder;
 use datafusion::physical_plan::ExecutionPlan;
 use std::sync::Arc;
 
@@ -153,8 +158,10 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     ///
     /// # Default implementation
     /// The default implementation returns `TableProviderFilterPushDown::Exact` for any filter
-    /// that is supported by at least one index, and `TableProviderFilterPushDown::Unsupported`
-    /// otherwise.
+    /// that is fully decomposable into an AND/OR tree of leaves that are each supported by an
+    /// index, and `TableProviderFilterPushDown::Unsupported` otherwise. A filter that is only
+    /// partially supported must be `Unsupported`, as `DataFusion` drops `Exact` filters and the
+    /// unsupported part would never be evaluated.
     ///
     /// # Errors
     /// Returns an error if the indexes cannot be listed or an index fails to evaluate
@@ -163,16 +170,14 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
         &self,
         filters: &[&Expr],
     ) -> Result<Vec<TableProviderFilterPushDown>> {
-        let indexes = self.indexes()?;
         filters
             .iter()
             .map(|filter| {
-                for index in &indexes {
-                    if index.supports_predicate(filter)? {
-                        return Ok(TableProviderFilterPushDown::Exact);
-                    }
+                if self.build_index_filter(filter)?.is_some() {
+                    Ok(TableProviderFilterPushDown::Exact)
+                } else {
+                    Ok(TableProviderFilterPushDown::Unsupported)
                 }
-                Ok(TableProviderFilterPushDown::Unsupported)
             })
             .collect()
     }
@@ -183,8 +188,11 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// * `indexes` - A slice of `IndexFilter` structs, each containing an index and a list of
     ///   expressions that can be handled by that index.
     /// * `_projection` - A slice of column indices to be projected. This is currently ignored.
-    /// * `_remaining_filters` - A slice of expressions that cannot be handled by any index.
-    /// * `limit` - An optional limit on the number of rows to return.
+    /// * `remaining_filters` - A slice of expressions that cannot be handled by any index.
+    ///   When non-empty, they are combined with `AND` and evaluated by a `FilterExec` above
+    ///   the record fetch.
+    /// * `limit` - An optional limit on the number of rows to return. When `remaining_filters`
+    ///   is non-empty, it is applied after the filter instead of being pushed to the fetch.
     /// * `schema` - The schema of the table.
     /// * `mapper` - A reference to a `RecordFetcher` that will be used to fetch records.
     ///
@@ -195,18 +203,36 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
         indexes: &[IndexFilter],
         // TODO: Implement projection support for index-based scans
         _projection: Option<&Vec<usize>>,
-        _remaining_filters: &[Expr],
+        remaining_filters: &[Expr],
         limit: Option<usize>,
         schema: SchemaRef,
         mapper: Arc<dyn RecordFetcher>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(RecordFetchExec::try_new(
+        let Some(predicate) = conjunction(remaining_filters.iter().cloned()) else {
+            return Ok(Arc::new(RecordFetchExec::try_new(
+                indexes.to_vec(),
+                limit,
+                Arc::clone(&mapper),
+                schema.clone(),
+                self.union_mode(),
+            )?));
+        };
+
+        let df_schema = DFSchema::try_from(Arc::clone(&schema))?;
+        let predicate = create_physical_expr(&predicate, &df_schema, &ExecutionProps::new())?;
+        // The limit must not reach the fetch: it would truncate rows before they are filtered.
+        let fetch = Arc::new(RecordFetchExec::try_new(
             indexes.to_vec(),
-            limit,
-            Arc::clone(&mapper),
-            schema.clone(),
+            None,
+            mapper,
+            schema,
             self.union_mode(),
-        )?))
+        )?);
+        Ok(Arc::new(
+            FilterExecBuilder::new(predicate, fetch)
+                .with_fetch(limit)
+                .build()?,
+        ))
     }
 }
 
@@ -409,6 +435,68 @@ mod tests {
 
         assert_eq!(indexed.len(), 0);
         assert_eq!(remaining.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_pushdown_or_of_indexed_columns_is_exact() -> Result<()> {
+        let provider = MockTableProvider::new(vec![
+            Arc::new(MockIndex {
+                column_name: "a".into(),
+                table_name: "t".into(),
+            }),
+            Arc::new(MockIndex {
+                column_name: "b".into(),
+                table_name: "t".into(),
+            }),
+        ]);
+        let filter = col("a").eq(lit(1)).or(col("b").eq(lit(2)));
+        let result = provider.supports_filters_index_pushdown(&[&filter])?;
+
+        assert_eq!(result, vec![TableProviderFilterPushDown::Exact]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_pushdown_or_mixing_indexed_and_non_indexed_is_unsupported() -> Result<()> {
+        let provider = MockTableProvider::new(vec![Arc::new(MockIndex {
+            column_name: "a".into(),
+            table_name: "t".into(),
+        })]);
+        let filter = col("a").eq(lit(1)).or(col("b").eq(lit(2)));
+        let result = provider.supports_filters_index_pushdown(&[&filter])?;
+
+        assert_eq!(result, vec![TableProviderFilterPushDown::Unsupported]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_pushdown_leaf_with_non_indexed_column_is_unsupported() -> Result<()> {
+        let provider = MockTableProvider::new(vec![Arc::new(MockIndex {
+            column_name: "a".into(),
+            table_name: "t".into(),
+        })]);
+        let filter = (col("a") + col("b")).gt(lit(1));
+        let result = provider.supports_filters_index_pushdown(&[&filter])?;
+
+        assert_eq!(result, vec![TableProviderFilterPushDown::Unsupported]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_pushdown_filter_without_columns_is_unsupported() -> Result<()> {
+        let provider = MockTableProvider::new(vec![Arc::new(MockIndex {
+            column_name: "a".into(),
+            table_name: "t".into(),
+        })]);
+        let filter = lit(true);
+        let result = provider.supports_filters_index_pushdown(&[&filter])?;
+
+        assert_eq!(result, vec![TableProviderFilterPushDown::Unsupported]);
 
         Ok(())
     }

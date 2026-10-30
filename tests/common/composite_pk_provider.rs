@@ -5,13 +5,12 @@ use datafusion::arrow::array::{Int32Array, StringArray, UInt64Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
-use datafusion::datasource::{TableProvider, TableType};
+use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_common::DataFusionError;
 use datafusion_index_provider::physical_plan::create_index_schema;
-use datafusion_index_provider::physical_plan::exec::fetch::RecordFetchExec;
 use datafusion_index_provider::physical_plan::Index;
 use datafusion_index_provider::provider::IndexedTableProvider;
 use datafusion_index_provider::types::UnionMode;
@@ -41,6 +40,7 @@ pub struct MultiTenantEmployeeProvider {
     schema: SchemaRef,
     age_index: Arc<CompositePkAgeIndex>,
     dept_index: Arc<CompositePkDeptIndex>,
+    batch: RecordBatch,
     fetcher: Arc<CompositePkFetcher>,
     union_mode: UnionMode,
 }
@@ -93,7 +93,8 @@ impl MultiTenantEmployeeProvider {
                 &tenant_ids,
                 &employee_ids,
             )),
-            fetcher: Arc::new(CompositePkFetcher::new(batch)),
+            fetcher: Arc::new(CompositePkFetcher::new(batch.clone())),
+            batch,
             union_mode: UnionMode::Parallel,
         }
     }
@@ -117,20 +118,29 @@ impl TableProvider for MultiTenantEmployeeProvider {
 
     async fn scan(
         &self,
-        _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let (indexed_filters, _remaining) = self.analyze_and_optimize_filters(filters)?;
+        let (indexed_filters, remaining_filters) = self.analyze_and_optimize_filters(filters)?;
 
-        Ok(Arc::new(RecordFetchExec::try_new(
-            indexed_filters,
+        // Filters reported as `Unsupported` are evaluated by `DataFusion` above the scan.
+        if indexed_filters.is_empty() {
+            return MemTable::try_new(self.schema.clone(), vec![vec![self.batch.clone()]])?
+                .scan(state, projection, &[], limit)
+                .await;
+        }
+
+        self.create_execution_plan_with_indexes(
+            &indexed_filters,
+            projection,
+            &remaining_filters,
             limit,
-            self.fetcher.clone(),
             self.schema.clone(),
-            self.union_mode,
-        )?))
+            self.fetcher.clone(),
+        )
+        .await
     }
 
     fn supports_filters_pushdown(

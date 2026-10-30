@@ -1196,7 +1196,7 @@ mod tests {
         }
 
         // 4. Assert results are empty
-        assert!(results.is_empty());
+        assert_eq!(results, Vec::<RecordBatch>::new());
 
         Ok(())
     }

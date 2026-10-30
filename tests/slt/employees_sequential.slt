@@ -36,3 +36,16 @@ SELECT * FROM employees WHERE age = 25 OR age < 29
 ----
 1 Alice 25 Engineering
 4 David 28 Engineering
+
+# --- OR mixing an indexed and a non-indexed column must not be dropped ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age < 31 AND (age = 30 OR name = 'Eve')
+----
+2 Bob 30 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age = 30 OR name = 'Eve'
+----
+2 Bob 30 Sales
+5 Eve 32 Sales
