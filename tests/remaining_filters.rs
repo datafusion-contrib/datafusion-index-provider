@@ -14,11 +14,22 @@ use datafusion_index_provider::types::UnionMode;
 
 /// Scans `employees` with `filters` attached to the `TableScan` and returns the ids.
 async fn scan_ids(filters: Vec<Expr>, fetch: Option<usize>, mode: UnionMode) -> Result<Vec<i32>> {
+    scan_ids_projected(filters, fetch, mode, None).await
+}
+
+/// Like [`scan_ids`], with `projection` (indices into the table schema) on the `TableScan`.
+async fn scan_ids_projected(
+    filters: Vec<Expr>,
+    fetch: Option<usize>,
+    mode: UnionMode,
+    projection: Option<Vec<usize>>,
+) -> Result<Vec<i32>> {
+    let expected_columns = projection.as_ref().map(Vec::len);
     let (ctx, provider) = common::setup_test_env_with_provider(mode);
     let plan = LogicalPlanBuilder::scan_with_filters_fetch(
         "employees",
         provider_as_source(provider),
-        None,
+        projection,
         filters,
         fetch,
     )?
@@ -27,6 +38,9 @@ async fn scan_ids(filters: Vec<Expr>, fetch: Option<usize>, mode: UnionMode) -> 
 
     let mut ids = Vec::new();
     for batch in &batches {
+        if let Some(expected) = expected_columns {
+            assert_eq!(batch.num_columns(), expected, "projection not applied");
+        }
         let column = batch
             .column_by_name("id")
             .expect("id column")
@@ -68,6 +82,24 @@ async fn limit_is_applied_after_remaining_filter() {
             vec![col("age").gt(lit(20)), col("name").eq(lit("Eve"))],
             Some(1),
             mode,
+        )
+        .await
+        .expect("query should succeed");
+
+        assert_eq!(ids, vec![5], "{mode:?}");
+    }
+}
+
+#[tokio::test]
+async fn remaining_filter_may_reference_unprojected_column() {
+    // Only `id` (index 0) is projected, but the remaining filter `name = 'Eve'` needs `name`,
+    // so the projection must be applied above the filter.
+    for mode in [UnionMode::Parallel, UnionMode::Sequential] {
+        let ids = scan_ids_projected(
+            vec![col("age").gt(lit(20)), col("name").eq(lit("Eve"))],
+            None,
+            mode,
+            Some(vec![0]),
         )
         .await
         .expect("query should succeed");
