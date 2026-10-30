@@ -123,11 +123,17 @@ pub trait Index: fmt::Debug + Send + Sync + 'static {
     /// perform a simple check for predicate support.
     fn column_name(&self) -> &str;
 
-    /// A fast check to see if this index can potentially satisfy the predicate.
+    /// Returns whether this index can answer the predicate exactly.
+    ///
+    /// Returning `true` is a promise that [`Self::scan`] returns exactly the primary keys
+    /// of the rows matching the predicate. Such predicates are reported to `DataFusion` as
+    /// `Exact` and are not re-evaluated afterwards: `scan` is the only thing evaluating them.
     ///
     /// # Default implementation
     /// The default implementation checks that the predicate references at least one
     /// column and that all referenced columns match the value of [`Self::column_name`].
+    /// It does not check operators: implementations whose `scan` does not handle every
+    /// operator on their column must override this method.
     ///
     /// # Errors
     /// Returns an error if the predicate expression cannot be analyzed for its

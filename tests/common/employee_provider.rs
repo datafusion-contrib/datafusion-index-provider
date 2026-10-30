@@ -10,7 +10,6 @@ use datafusion::error::Result;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_common::DataFusionError;
-use datafusion_index_provider::physical_plan::exec::fetch::RecordFetchExec;
 use datafusion_index_provider::physical_plan::Index;
 use datafusion_index_provider::provider::IndexedTableProvider;
 use datafusion_index_provider::types::{IndexFilter, UnionMode};
@@ -125,6 +124,7 @@ impl TableProvider for EmployeeTableProvider {
             limit,
             &indexed_filters,
         )
+        .await
     }
 
     fn supports_filters_pushdown(
@@ -147,21 +147,23 @@ impl IndexedTableProvider for EmployeeTableProvider {
 }
 
 impl EmployeeTableProvider {
-    fn scan_with_indexes(
+    async fn scan_with_indexes(
         &self,
         _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
-        _remaining_filters: &[Expr],
+        projection: Option<&Vec<usize>>,
+        remaining_filters: &[Expr],
         limit: Option<usize>,
         indexes: &[IndexFilter],
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(RecordFetchExec::try_new(
-            indexes.to_vec(),
+        self.create_execution_plan_with_indexes(
+            indexes,
+            projection,
+            remaining_filters,
             limit,
-            self.mapper.clone(),
             self.schema.clone(),
-            self.union_mode,
-        )?))
+            self.mapper.clone(),
+        )
+        .await
     }
 
     /// Builds an `ExecutionPlan` to scan the table.

@@ -59,3 +59,11 @@ SELECT * FROM employees WHERE (age <= 25 AND department = 'Engineering') OR depa
 acme 1 Alice 25 Engineering
 acme 2 Bob 30 Sales
 globex 2 Eve 32 Sales
+
+# --- OR mixing an indexed and a non-indexed column: not pushed down, full scan fallback ---
+
+query TITIT rowsort
+SELECT * FROM employees WHERE age = 30 OR name = 'Eve'
+----
+acme 2 Bob 30 Sales
+globex 2 Eve 32 Sales
