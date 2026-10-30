@@ -25,11 +25,13 @@ use datafusion::catalog::TableProvider;
 use datafusion::common::DFSchema;
 use datafusion::error::Result;
 use datafusion::logical_expr::execution_props::ExecutionProps;
+use datafusion::logical_expr::physical_planning_context::PhysicalPlanningContext;
 use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, Operator, TableProviderFilterPushDown};
 use datafusion::physical_expr::create_physical_expr;
 use datafusion::physical_plan::filter::FilterExecBuilder;
 use datafusion::physical_plan::ExecutionPlan;
+
 use std::sync::Arc;
 
 /// A table provider that can be scanned using indexes.
@@ -219,7 +221,12 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
         };
 
         let df_schema = DFSchema::try_from(Arc::clone(&schema))?;
-        let predicate = create_physical_expr(&predicate, &df_schema, &ExecutionProps::new())?;
+        let predicate = create_physical_expr(
+            &predicate,
+            &df_schema,
+            &ExecutionProps::new(),
+            &PhysicalPlanningContext::default(),
+        )?;
         // The limit must not reach the fetch: it would truncate rows before they are filtered.
         let fetch = Arc::new(RecordFetchExec::try_new(
             indexes.to_vec(),

@@ -17,6 +17,7 @@
 
 use crate::physical_plan::Index;
 use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
 use datafusion::logical_expr::Expr;
@@ -25,7 +26,7 @@ use datafusion::physical_plan::execution_plan::Boundedness;
 use datafusion::physical_plan::expressions::{Column, PhysicalSortExpr};
 use datafusion::physical_plan::{
     execution_plan::EmissionType, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning,
-    PlanProperties, SendableRecordBatchStream,
+    PlanProperties, SendableRecordBatchStream, PhysicalExpr,
 };
 use std::sync::Arc;
 
@@ -122,6 +123,15 @@ impl ExecutionPlan for IndexScanExec {
         }
 
         self.index.scan(&self.filters, self.limit)
+    }
+
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(
+            &Arc<dyn PhysicalExpr>,
+        ) -> Result<TreeNodeRecursion, DataFusionError>,
+    ) -> Result<TreeNodeRecursion, DataFusionError> {
+        Ok(TreeNodeRecursion::Continue)
     }
 }
 
