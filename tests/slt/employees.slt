@@ -250,3 +250,39 @@ SELECT * FROM employees WHERE age = 30 OR name = 'Eve'
 ----
 2 Bob 30 Sales
 5 Eve 32 Sales
+
+# --- projection must be applied to index scans ---
+
+query T rowsort
+SELECT name FROM employees WHERE age = 30
+----
+Bob
+
+# projected columns in non-prefix order
+query IT rowsort
+SELECT age, name FROM employees WHERE age = 30
+----
+30 Bob
+
+# remaining filter references an unprojected column (name is projected, age is not)
+query T rowsort
+SELECT name FROM employees WHERE age < 31 AND (age = 30 OR name = 'Eve')
+----
+Bob
+
+# zero-column projection must keep the row count
+query I rowsort
+SELECT count(*) FROM employees WHERE age < 31 AND (age = 30 OR name = 'Eve')
+----
+1
+
+query I rowsort
+SELECT count(*) FROM employees WHERE department = 'Sales'
+----
+2
+
+# OR union with a projection and a limit
+query T
+SELECT name FROM employees WHERE age = 25 OR age = 30 ORDER BY name LIMIT 1
+----
+Alice
