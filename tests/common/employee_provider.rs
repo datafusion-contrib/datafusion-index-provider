@@ -5,7 +5,7 @@ use datafusion::arrow::array::{Int32Array, StringArray, UInt64Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
-use datafusion::datasource::{TableProvider, TableType};
+use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
@@ -25,6 +25,7 @@ pub struct EmployeeTableProvider {
     schema: SchemaRef,
     age_index: Arc<AgeIndex>,
     department_index: Arc<DepartmentIndex>,
+    batch: RecordBatch,
     mapper: Arc<BatchMapper>,
     union_mode: UnionMode,
 }
@@ -72,7 +73,8 @@ impl EmployeeTableProvider {
             schema,
             age_index: Arc::new(AgeIndex::new(&age_array, &pk_ids)),
             department_index: Arc::new(DepartmentIndex::new(&department_array, &pk_ids)),
-            mapper: Arc::new(BatchMapper::new(vec![batch])),
+            mapper: Arc::new(BatchMapper::new(vec![batch.clone()])),
+            batch,
             union_mode: UnionMode::Parallel,
         }
     }
@@ -111,7 +113,9 @@ impl TableProvider for EmployeeTableProvider {
         let (indexed_filters, remaining_filters) = self.analyze_and_optimize_filters(filters)?;
 
         if indexed_filters.is_empty() {
-            return self.scan_with_table(state, projection, &remaining_filters, limit);
+            return self
+                .scan_with_table(state, projection, &remaining_filters, limit)
+                .await;
         }
 
         self.scan_with_indexes(
@@ -163,13 +167,18 @@ impl EmployeeTableProvider {
     /// Builds an `ExecutionPlan` to scan the table.
     /// This is the main entry point for scanning the table without indexes.
     /// It is designed to be called by `scan_with_indexes_or_fallback`.
-    fn scan_with_table(
+    ///
+    /// Filters are not applied here: `DataFusion` keeps a `Filter` node above the scan
+    /// for filters reported as `Unsupported`.
+    async fn scan_with_table(
         &self,
-        _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
         _remaining_filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        unimplemented!()
+        MemTable::try_new(self.schema.clone(), vec![vec![self.batch.clone()]])?
+            .scan(state, projection, &[], limit)
+            .await
     }
 }

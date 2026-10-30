@@ -126,8 +126,8 @@ pub trait Index: fmt::Debug + Send + Sync + 'static {
     /// A fast check to see if this index can potentially satisfy the predicate.
     ///
     /// # Default implementation
-    /// The default implementation checks if any column referenced in the predicate
-    /// matches the value of [`Self::column_name`].
+    /// The default implementation checks that the predicate references at least one
+    /// column and that all referenced columns match the value of [`Self::column_name`].
     ///
     /// # Errors
     /// Returns an error if the predicate expression cannot be analyzed for its
@@ -135,7 +135,7 @@ pub trait Index: fmt::Debug + Send + Sync + 'static {
     fn supports_predicate(&self, predicate: &Expr) -> Result<bool> {
         let mut columns = HashSet::new();
         expr_to_columns(predicate, &mut columns)?;
-        Ok(columns.iter().any(|col| col.name == self.column_name()))
+        Ok(!columns.is_empty() && columns.iter().all(|col| col.name == self.column_name()))
     }
 
     /// Returns indication if the index is ordered by the primary key columns.
