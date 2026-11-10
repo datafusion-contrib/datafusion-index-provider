@@ -67,3 +67,10 @@ SELECT * FROM employees WHERE age = 30 OR name = 'Eve'
 ----
 acme 2 Bob 30 Sales
 globex 2 Eve 32 Sales
+
+# --- projection must be applied to index scans ---
+
+query TI rowsort
+SELECT name, employee_id FROM employees WHERE age = 30
+----
+Bob 2

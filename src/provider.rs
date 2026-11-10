@@ -28,8 +28,10 @@ use datafusion::logical_expr::execution_props::ExecutionProps;
 use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, Operator, TableProviderFilterPushDown};
 use datafusion::physical_expr::create_physical_expr;
+use datafusion::physical_plan::expressions::Column;
 use datafusion::physical_plan::filter::FilterExecBuilder;
-use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::projection::ProjectionExec;
+use datafusion::physical_plan::{ExecutionPlan, PhysicalExpr};
 use std::sync::Arc;
 
 /// A table provider that can be scanned using indexes.
@@ -187,7 +189,11 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// # Arguments
     /// * `indexes` - A slice of `IndexFilter` structs, each containing an index and a list of
     ///   expressions that can be handled by that index.
-    /// * `_projection` - A slice of column indices to be projected. This is currently ignored.
+    /// * `projection` - Indices of the table columns to output, as received by
+    ///   [`TableProvider::scan`]. When `Some`, the final plan is wrapped in a `ProjectionExec`
+    ///   placed above the remaining-filter `FilterExec`, so that remaining filters can still
+    ///   reference columns that are not projected. `Some` of an empty list yields a zero-column
+    ///   plan that keeps the row count (e.g. `count(*)`). When `None`, all columns are output.
     /// * `remaining_filters` - A slice of expressions that cannot be handled by any index.
     ///   When non-empty, they are combined with `AND` and evaluated by a `FilterExec` above
     ///   the record fetch.
@@ -201,38 +207,55 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     async fn create_execution_plan_with_indexes(
         &self,
         indexes: &[IndexFilter],
-        // TODO: Implement projection support for index-based scans
-        _projection: Option<&Vec<usize>>,
+        projection: Option<&Vec<usize>>,
         remaining_filters: &[Expr],
         limit: Option<usize>,
         schema: SchemaRef,
         mapper: Arc<dyn RecordFetcher>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let Some(predicate) = conjunction(remaining_filters.iter().cloned()) else {
-            return Ok(Arc::new(RecordFetchExec::try_new(
+        let plan: Arc<dyn ExecutionPlan> = if let Some(predicate) =
+            conjunction(remaining_filters.iter().cloned())
+        {
+            let df_schema = DFSchema::try_from(Arc::clone(&schema))?;
+            let predicate = create_physical_expr(&predicate, &df_schema, &ExecutionProps::new())?;
+            // The limit must not reach the fetch: it would truncate rows before they are filtered.
+            let fetch = Arc::new(RecordFetchExec::try_new(
+                indexes.to_vec(),
+                None,
+                mapper,
+                Arc::clone(&schema),
+                self.union_mode(),
+            )?);
+            Arc::new(
+                FilterExecBuilder::new(predicate, fetch)
+                    .with_fetch(limit)
+                    .build()?,
+            )
+        } else {
+            Arc::new(RecordFetchExec::try_new(
                 indexes.to_vec(),
                 limit,
-                Arc::clone(&mapper),
-                schema.clone(),
+                mapper,
+                Arc::clone(&schema),
                 self.union_mode(),
-            )?));
+            )?)
         };
 
-        let df_schema = DFSchema::try_from(Arc::clone(&schema))?;
-        let predicate = create_physical_expr(&predicate, &df_schema, &ExecutionProps::new())?;
-        // The limit must not reach the fetch: it would truncate rows before they are filtered.
-        let fetch = Arc::new(RecordFetchExec::try_new(
-            indexes.to_vec(),
-            None,
-            mapper,
-            schema,
-            self.union_mode(),
-        )?);
-        Ok(Arc::new(
-            FilterExecBuilder::new(predicate, fetch)
-                .with_fetch(limit)
-                .build()?,
-        ))
+        let Some(projection) = projection else {
+            return Ok(plan);
+        };
+        // Applied above the remaining filters, which may reference unprojected columns.
+        let exprs = projection
+            .iter()
+            .map(|&idx| {
+                let name = schema.field(idx).name();
+                (
+                    Arc::new(Column::new(name, idx)) as Arc<dyn PhysicalExpr>,
+                    name.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        Ok(Arc::new(ProjectionExec::try_new(exprs, plan)?))
     }
 }
 
