@@ -36,8 +36,7 @@ use datafusion::physical_expr::calculate_union;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
-    Partitioning, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
-    PhysicalExpr,
+    Partitioning, PhysicalExpr, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
 };
 use futures::Stream;
 
@@ -189,9 +188,7 @@ impl ExecutionPlan for SequentialUnionExec {
 
     fn apply_expressions(
         &self,
-        _f: &mut dyn FnMut(
-            &Arc<dyn PhysicalExpr>,
-        ) -> Result<TreeNodeRecursion>,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
     ) -> Result<TreeNodeRecursion> {
         Ok(TreeNodeRecursion::Continue)
     }

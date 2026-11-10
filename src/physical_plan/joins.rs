@@ -198,7 +198,7 @@ mod tests {
         fn apply_expressions(
             &self,
             _f: &mut dyn FnMut(
-                &Arc<dyn datafusion::physical_plan::PhysicalExpr>,
+                &Arc<dyn PhysicalExpr>,
             ) -> Result<TreeNodeRecursion>,
         ) -> Result<TreeNodeRecursion> {
             Ok(TreeNodeRecursion::Continue)

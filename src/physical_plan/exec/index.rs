@@ -26,7 +26,7 @@ use datafusion::physical_plan::execution_plan::Boundedness;
 use datafusion::physical_plan::expressions::{Column, PhysicalSortExpr};
 use datafusion::physical_plan::{
     execution_plan::EmissionType, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning,
-    PlanProperties, SendableRecordBatchStream, PhysicalExpr,
+    PhysicalExpr, PlanProperties, SendableRecordBatchStream,
 };
 use std::sync::Arc;
 
@@ -127,9 +127,7 @@ impl ExecutionPlan for IndexScanExec {
 
     fn apply_expressions(
         &self,
-        _f: &mut dyn FnMut(
-            &Arc<dyn PhysicalExpr>,
-        ) -> Result<TreeNodeRecursion, DataFusionError>,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion, DataFusionError>,
     ) -> Result<TreeNodeRecursion, DataFusionError> {
         Ok(TreeNodeRecursion::Continue)
     }

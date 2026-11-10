@@ -235,8 +235,8 @@ The test suite includes:
 
 ## Compatibility
 
-- **DataFusion**: 54.x
-- **Rust**: 1.88+ (MSRV)
+- **DataFusion**: 55.x
+- **Rust**: 1.94+ (MSRV)
 - **Arrow**: Compatible with DataFusion's Arrow version
 
 ## Architecture Details
