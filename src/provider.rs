@@ -25,6 +25,7 @@ use datafusion::catalog::TableProvider;
 use datafusion::common::DFSchema;
 use datafusion::error::Result;
 use datafusion::logical_expr::execution_props::ExecutionProps;
+use datafusion::logical_expr::physical_planning_context::PhysicalPlanningContext;
 use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, Operator, TableProviderFilterPushDown};
 use datafusion::physical_expr::create_physical_expr;
@@ -213,33 +214,37 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
         schema: SchemaRef,
         mapper: Arc<dyn RecordFetcher>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let plan: Arc<dyn ExecutionPlan> = if let Some(predicate) =
-            conjunction(remaining_filters.iter().cloned())
-        {
-            let df_schema = DFSchema::try_from(Arc::clone(&schema))?;
-            let predicate = create_physical_expr(&predicate, &df_schema, &ExecutionProps::new())?;
-            // The limit must not reach the fetch: it would truncate rows before they are filtered.
-            let fetch = Arc::new(RecordFetchExec::try_new(
-                indexes.to_vec(),
-                None,
-                mapper,
-                Arc::clone(&schema),
-                self.union_mode(),
-            )?);
-            Arc::new(
-                FilterExecBuilder::new(predicate, fetch)
-                    .with_fetch(limit)
-                    .build()?,
-            )
-        } else {
-            Arc::new(RecordFetchExec::try_new(
-                indexes.to_vec(),
-                limit,
-                mapper,
-                Arc::clone(&schema),
-                self.union_mode(),
-            )?)
-        };
+        let plan: Arc<dyn ExecutionPlan> =
+            if let Some(predicate) = conjunction(remaining_filters.iter().cloned()) {
+                let df_schema = DFSchema::try_from(Arc::clone(&schema))?;
+                let predicate = create_physical_expr(
+                    &predicate,
+                    &df_schema,
+                    &ExecutionProps::new(),
+                    &PhysicalPlanningContext::default(),
+                )?;
+                // The limit must not reach the fetch: it would truncate rows before they are filtered.
+                let fetch = Arc::new(RecordFetchExec::try_new(
+                    indexes.to_vec(),
+                    None,
+                    mapper,
+                    Arc::clone(&schema),
+                    self.union_mode(),
+                )?);
+                Arc::new(
+                    FilterExecBuilder::new(predicate, fetch)
+                        .with_fetch(limit)
+                        .build()?,
+                )
+            } else {
+                Arc::new(RecordFetchExec::try_new(
+                    indexes.to_vec(),
+                    limit,
+                    mapper,
+                    Arc::clone(&schema),
+                    self.union_mode(),
+                )?)
+            };
 
         let Some(projection) = projection else {
             return Ok(plan);
