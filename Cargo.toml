@@ -24,7 +24,7 @@ log = "0.4.33"
 [dev-dependencies]
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
 env_logger = "0.11.11"
-parking_lot = "0.12.5"
+parking_lot = "0.13.0"
 datafusion = { version = "55.2.0", default-features = false, features = ["sql"] }
 datafusion-sqllogictest = { version = "55.2.0", default-features = false }
 sqllogictest = "0.29"
