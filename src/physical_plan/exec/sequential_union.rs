@@ -32,7 +32,7 @@ use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
-use datafusion::physical_expr::calculate_union;
+use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
@@ -54,7 +54,7 @@ use futures::Stream;
 /// - Reports 1 output partition regardless of input partition counts
 /// - Processes all partitions from all inputs sequentially in order
 /// - Validates that all inputs have compatible schemas
-/// - Computes common ordering properties across all inputs
+/// - Reports no output ordering (inputs are concatenated, not merged)
 #[derive(Debug)]
 pub struct SequentialUnionExec {
     /// Input execution plans to union
@@ -98,12 +98,8 @@ impl SequentialUnionExec {
             }
         }
 
-        // Compute common equivalence properties across all inputs
-        let children_eqps: Vec<_> = inputs
-            .iter()
-            .map(|p| p.properties().equivalence_properties().clone())
-            .collect();
-        let eq_properties = calculate_union(children_eqps, Arc::clone(&schema))?;
+        // Inputs are concatenated into one partition, so no input ordering survives.
+        let eq_properties = EquivalenceProperties::new(Arc::clone(&schema));
 
         let properties = Arc::new(PlanProperties::new(
             eq_properties,
@@ -235,6 +231,9 @@ mod tests {
     use datafusion::arrow::array::Int64Array;
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::datasource::memory::MemorySourceConfig;
+    use datafusion::datasource::source::DataSourceExec;
+    use datafusion::physical_expr::{LexOrdering, PhysicalSortExpr};
+    use datafusion::physical_plan::expressions::Column;
     use futures::StreamExt;
 
     fn create_test_batch(values: Vec<i64>) -> RecordBatch {
@@ -245,6 +244,19 @@ mod tests {
     fn create_memory_exec(batches: Vec<RecordBatch>) -> Arc<dyn ExecutionPlan> {
         let schema = batches[0].schema();
         MemorySourceConfig::try_new_exec(&[batches], schema, None).unwrap()
+    }
+
+    fn create_sorted_memory_exec(values: Vec<i64>) -> Arc<dyn ExecutionPlan> {
+        let batch = create_test_batch(values);
+        let schema = batch.schema();
+        let ordering =
+            LexOrdering::new([PhysicalSortExpr::new_default(Arc::new(Column::new("a", 0)))])
+                .unwrap();
+        let source = MemorySourceConfig::try_new(&[vec![batch]], schema, None)
+            .unwrap()
+            .try_with_sort_information(vec![ordering])
+            .unwrap();
+        DataSourceExec::from_data_source(source)
     }
 
     #[tokio::test]
@@ -373,5 +385,19 @@ mod tests {
                 "Unexpected error: {e}"
             ),
         }
+    }
+
+    /// Inputs are concatenated into one partition, so even when every input is
+    /// sorted the output is not (e.g. [1, 5, 9] then [2, 5]).
+    #[test]
+    fn test_sequential_union_reports_no_output_ordering() -> Result<()> {
+        let input1 = create_sorted_memory_exec(vec![1, 5, 9]);
+        let input2 = create_sorted_memory_exec(vec![2, 5]);
+        assert!(input1.properties().output_ordering().is_some());
+        assert!(input2.properties().output_ordering().is_some());
+
+        let union = SequentialUnionExec::try_new(vec![input1, input2])?;
+        assert!(union.properties().output_ordering().is_none());
+        Ok(())
     }
 }

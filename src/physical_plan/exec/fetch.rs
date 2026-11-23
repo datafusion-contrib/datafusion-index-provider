@@ -595,6 +595,7 @@ mod tests {
     use datafusion::logical_expr::{col, lit};
     use datafusion::physical_plan::joins::HashJoinExec;
     use datafusion::physical_plan::memory::MemoryStream;
+    use datafusion::physical_plan::InputOrderMode;
     use datafusion::prelude::SessionContext;
     use std::any::Any;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -609,6 +610,7 @@ mod tests {
         schema: SchemaRef,
         scan_called: Mutex<bool>,
         batches: Vec<RecordBatch>,
+        ordered: bool,
     }
 
     impl MockIndex {
@@ -617,7 +619,13 @@ mod tests {
                 schema: create_index_schema([Field::new(PK_COL, DataType::UInt64, false)]),
                 scan_called: Mutex::new(false),
                 batches,
+                ordered: false,
             }
+        }
+
+        fn ordered(mut self) -> Self {
+            self.ordered = true;
+            self
         }
     }
 
@@ -636,6 +644,10 @@ mod tests {
 
         fn table_name(&self) -> &'static str {
             "mock_table"
+        }
+
+        fn is_ordered(&self) -> bool {
+            self.ordered
         }
 
         fn column_name(&self) -> &'static str {
@@ -1408,6 +1420,62 @@ mod tests {
         assert_eq!(fetcher.rows_fetched(), 10);
         assert_eq!(returned, 10);
         assert!(fetcher.fetch_calls() > 0);
+        Ok(())
+    }
+
+    /// A sequential union of ordered indexes is not itself ordered, so the OR
+    /// dedup must not use the sorted aggregation mode (it would emit duplicates).
+    #[tokio::test]
+    async fn test_sequential_or_ordered_indexes_dedups_overlapping_pks() -> Result<()> {
+        let ordered_index = |ids: Vec<u64>| -> Result<IndexFilter> {
+            let batch =
+                RecordBatch::try_from_iter(vec![(PK_COL, Arc::new(UInt64Array::from(ids)) as _)])?;
+            Ok(IndexFilter::Single {
+                index: Arc::new(MockIndex::new(vec![batch]).ordered()),
+                filter: col("a").eq(lit(1)),
+            })
+        };
+        let indexes = vec![IndexFilter::Or(vec![
+            ordered_index(vec![1, 5, 9])?,
+            ordered_index(vec![2, 5])?,
+        ])];
+
+        let fetcher = Arc::new(MockRecordFetcher::new().with_data());
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(
+            indexes,
+            None,
+            fetcher.clone(),
+            schema,
+            UnionMode::Sequential,
+        )?;
+
+        let agg = exec
+            .input
+            .downcast_ref::<AggregateExec>()
+            .expect("OR input should be an AggregateExec");
+        assert_eq!(agg.input_order_mode(), &InputOrderMode::Linear);
+        let union = agg.input();
+        assert_eq!(union.name(), "SequentialUnionExec");
+        assert!(union.properties().output_ordering().is_none());
+
+        let task_ctx = Arc::new(TaskContext::default());
+        let mut stream = exec.execute(0, task_ctx)?;
+        let mut ids = vec![];
+        while let Some(batch) = stream.next().await {
+            let batch = batch?;
+            let col = batch
+                .column_by_name(PK_COL)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .unwrap();
+            ids.extend(col.values().iter().copied());
+        }
+        ids.sort_unstable();
+
+        assert_eq!(ids, vec![1, 2, 5, 9]);
+        assert_eq!(fetcher.rows_fetched(), 4);
         Ok(())
     }
 }
