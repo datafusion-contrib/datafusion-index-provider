@@ -152,6 +152,7 @@ impl ExecutionPlan for IndexScanExec {
         Ok(Box::pin(IndexScanStream {
             inner: stream,
             baseline_metrics,
+            span,
         }))
     }
 
@@ -184,6 +185,7 @@ impl IndexScanExec {
     /// # Errors
     /// Returns an error if the plan properties cannot be computed for the given schema.
     #[tracing::instrument(
+        level = "debug",
         skip_all,
         fields(index = index.name(), filters = filters.len(), limit = ?limit)
     )]
@@ -224,10 +226,12 @@ impl IndexScanExec {
     }
 }
 
-/// Wraps the stream returned by [`Index::scan`] to record [`BaselineMetrics`].
+/// Wraps the stream returned by [`Index::scan`] to record [`BaselineMetrics`] and
+/// poll it inside the `index_scan` span.
 struct IndexScanStream {
     inner: SendableRecordBatchStream,
     baseline_metrics: BaselineMetrics,
+    span: tracing::Span,
 }
 
 impl RecordBatchStream for IndexScanStream {
@@ -243,6 +247,7 @@ impl Stream for IndexScanStream {
         let this = &mut *self;
         let poll = {
             let _timer = this.baseline_metrics.elapsed_compute().timer();
+            let _entered = this.span.enter();
             this.inner.poll_next_unpin(cx)
         };
         this.baseline_metrics.record_poll(poll)

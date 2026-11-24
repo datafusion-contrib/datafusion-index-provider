@@ -22,6 +22,8 @@ use tracing_subscriber::Layer;
 struct CapturedSpan {
     name: &'static str,
     fields: HashMap<&'static str, String>,
+    /// Number of times the span was entered.
+    enters: usize,
 }
 
 /// Layer capturing every span. The index of a span in `spans` is stored in its extensions.
@@ -53,10 +55,19 @@ where
         spans.push(CapturedSpan {
             name: attrs.metadata().name(),
             fields,
+            enters: 0,
         });
         if let Some(span) = ctx.span(id) {
             span.extensions_mut().insert(spans.len() - 1);
         }
+    }
+
+    fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
+        let Some(span) = ctx.span(id) else { return };
+        let Some(&idx) = span.extensions().get::<usize>() else {
+            return;
+        };
+        self.spans.lock().unwrap()[idx].enters += 1;
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
@@ -100,6 +111,12 @@ async fn index_scan_and_record_fetch_emit_spans() -> Result<()> {
     assert_eq!(scans[0].fields["table"], "employee");
     assert_eq!(scans[0].fields["partition"], "0");
     assert_eq!(scans[0].fields["filters"], "1");
+    // Entered around `Index::scan`, then on each poll of the index stream (batch, end).
+    assert!(
+        scans[0].enters >= 3,
+        "index_scan entered {} times",
+        scans[0].enters
+    );
 
     let fetches = spans_named("record_fetch");
     assert_eq!(fetches.len(), 1, "record_fetch spans: {fetches:?}");

@@ -65,7 +65,7 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     ///
     /// # Errors
     /// Returns an error if any filter expression cannot be analyzed against the indexes.
-    #[tracing::instrument(skip_all, fields(filters = filters.len()))]
+    #[tracing::instrument(level = "debug", skip_all, fields(filters = filters.len()))]
     fn analyze_and_optimize_filters(&self, filters: &[Expr]) -> Result<(IndexFilters, Vec<Expr>)> {
         let (indexed_filters, remaining_filters): (Vec<_>, Vec<_>) = filters
             .iter()
@@ -184,7 +184,7 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// # Errors
     /// Returns an error if the indexes cannot be listed or an index fails to evaluate
     /// whether it supports a filter.
-    #[tracing::instrument(skip_all, fields(filters = filters.len()))]
+    #[tracing::instrument(level = "debug", skip_all, fields(filters = filters.len()))]
     fn supports_filters_index_pushdown(
         &self,
         filters: &[&Expr],
@@ -222,6 +222,7 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// # Returns
     /// A `Result` containing an `Arc<dyn ExecutionPlan>` that can be used to scan the table.
     #[tracing::instrument(
+        level = "debug",
         skip_all,
         fields(
             index_filters = indexes.len(),

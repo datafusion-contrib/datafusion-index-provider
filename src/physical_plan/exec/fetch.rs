@@ -90,6 +90,7 @@ impl RecordFetchExec {
     /// if the input scan plan cannot be built, or if `schema` fields do not match
     /// [`RecordFetcher::schema`].
     #[tracing::instrument(
+        level = "debug",
         skip_all,
         fields(
             index_filter = %indexes.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
@@ -538,7 +539,7 @@ enum FetchState {
 
 impl RecordFetchStream {
     /// Create a new `RecordFetchStream`.
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(
         input: SendableRecordBatchStream,
         fetcher: Arc<dyn RecordFetcher>,
