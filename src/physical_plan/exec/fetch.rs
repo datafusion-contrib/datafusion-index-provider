@@ -1370,12 +1370,14 @@ mod tests {
         assert_eq!(count(&fetch, "fetch_calls"), 2);
         assert_eq!(count(&fetch, "input_rows"), 5);
         assert_eq!(count(&fetch, "fetched_rows"), 5);
-        assert!(count(&fetch, "fetch_time") > 0);
+        // An unrecorded `Time` aggregates to 1ns, and each recorded span adds at
+        // least 1ns, so `> 1` proves the timers were actually fed.
+        assert!(count(&fetch, "fetch_time") > 1);
 
         let scan = exec.input.metrics().expect("IndexScanExec metrics");
         assert_eq!(exec.input.name(), "IndexScanExec");
         assert_eq!(scan.output_rows(), Some(5));
-        assert!(scan.elapsed_compute().is_some_and(|t| t > 0));
+        assert!(scan.elapsed_compute().is_some_and(|t| t > 1));
 
         Ok(())
     }
