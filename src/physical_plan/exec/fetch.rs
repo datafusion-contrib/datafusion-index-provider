@@ -30,7 +30,10 @@ use std::task::{Context, Poll};
 use datafusion::arrow::datatypes::{Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::physical_expr::EquivalenceProperties;
-use datafusion::physical_plan::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
+use datafusion::physical_plan::metrics::{
+    BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder, MetricCategory, MetricsSet,
+    Time,
+};
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, Partitioning, PlanProperties,
     RecordBatchStream,
@@ -437,12 +440,16 @@ impl ExecutionPlan for RecordFetchExec {
 
         let input_stream = self.input.execute(0, context)?;
         let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let fetch_metrics = FetchMetrics::new(&self.metrics, partition);
 
-        Ok(Box::pin(RecordFetchStream::new(
-            input_stream,
-            self.record_fetcher.clone(),
-            baseline_metrics,
-        )))
+        Ok(Box::pin(
+            RecordFetchStream::new(input_stream, self.record_fetcher.clone(), baseline_metrics)
+                .with_fetch_metrics(fetch_metrics),
+        ))
+    }
+
+    fn metrics(&self) -> Option<MetricsSet> {
+        Some(self.metrics.clone_inner())
     }
 
     fn apply_expressions(
@@ -453,12 +460,44 @@ impl ExecutionPlan for RecordFetchExec {
     }
 }
 
+/// Metrics recorded around [`RecordFetcher::fetch`] calls.
+#[derive(Debug, Default)]
+struct FetchMetrics {
+    /// Number of [`RecordFetcher::fetch`] calls.
+    fetch_calls: Count,
+    /// Primary key rows received from the index input and passed to the fetcher.
+    input_rows: Count,
+    /// Rows returned by the fetcher.
+    fetched_rows: Count,
+    /// Wall-clock time spent awaiting [`RecordFetcher::fetch`].
+    fetch_time: Time,
+}
+
+impl FetchMetrics {
+    fn new(metrics: &ExecutionPlanMetricsSet, partition: usize) -> Self {
+        Self {
+            fetch_calls: MetricBuilder::new(metrics)
+                .with_category(MetricCategory::Rows)
+                .counter("fetch_calls", partition),
+            input_rows: MetricBuilder::new(metrics)
+                .with_category(MetricCategory::Rows)
+                .counter("input_rows", partition),
+            fetched_rows: MetricBuilder::new(metrics)
+                .with_category(MetricCategory::Rows)
+                .counter("fetched_rows", partition),
+            fetch_time: MetricBuilder::new(metrics).subset_time("fetch_time", partition),
+        }
+    }
+}
+
 /// A stream that fetches records using row IDs from an input stream.
 pub struct RecordFetchStream {
     /// The schema of the output data.
     schema: SchemaRef,
     /// Execution metrics.
     baseline_metrics: BaselineMetrics,
+    /// Fetch-specific metrics.
+    fetch_metrics: FetchMetrics,
     /// The state of the stream.
     state: FetchState,
 }
@@ -500,8 +539,15 @@ impl RecordFetchStream {
         Self {
             schema,
             baseline_metrics,
+            fetch_metrics: FetchMetrics::default(),
             state,
         }
+    }
+
+    /// Records fetch calls, keys and timings into `fetch_metrics`.
+    fn with_fetch_metrics(mut self, fetch_metrics: FetchMetrics) -> Self {
+        self.fetch_metrics = fetch_metrics;
+        self
     }
 }
 
@@ -515,13 +561,20 @@ impl Stream for RecordFetchStream {
                     match input.poll_next_unpin(cx) {
                         Poll::Ready(Some(Ok(batch))) if batch.num_rows() > 0 => {
                             // Start async fetch for non-empty batch
+                            self.fetch_metrics.fetch_calls.add(1);
+                            self.fetch_metrics.input_rows.add(batch.num_rows());
                             let fut = {
                                 let fetcher = fetcher.clone();
+                                let fetched_rows = self.fetch_metrics.fetched_rows.clone();
+                                let fetch_time = self.fetch_metrics.fetch_time.clone();
                                 async move {
-                                    fetcher
-                                        .fetch(batch)
-                                        .await
-                                        .map(|batch| (input, fetcher, batch))
+                                    let timer = fetch_time.timer();
+                                    let result = fetcher.fetch(batch).await;
+                                    timer.done();
+                                    result.map(|batch| {
+                                        fetched_rows.add(batch.num_rows());
+                                        (input, fetcher, batch)
+                                    })
                                 }
                                 .boxed()
                             };
@@ -1280,6 +1333,49 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], expected_batch1);
         assert_eq!(results[1], expected_batch2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_record_fetch_exec_metrics() -> Result<()> {
+        let batch1 = RecordBatch::try_from_iter(vec![(
+            PK_COL,
+            Arc::new(UInt64Array::from(vec![1, 3])) as _,
+        )])?;
+        let batch2 = RecordBatch::try_from_iter(vec![(
+            PK_COL,
+            Arc::new(UInt64Array::from(vec![5, 7, 9])) as _,
+        )])?;
+        let indexes = vec![IndexFilter::Single {
+            index: Arc::new(MockIndex::new(vec![batch1, batch2])),
+            filter: col("a").eq(lit(1)),
+        }];
+        let fetcher = Arc::new(MockRecordFetcher::new().with_data());
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(indexes, None, fetcher, schema, UnionMode::Parallel)?;
+
+        let task_ctx = Arc::new(TaskContext::default());
+        datafusion::physical_plan::common::collect(exec.execute(0, task_ctx)?).await?;
+
+        let count = |metrics: &MetricsSet, name: &str| {
+            metrics
+                .sum_by_name(name)
+                .unwrap_or_else(|| panic!("missing metric {name}"))
+                .as_usize()
+        };
+
+        let fetch = exec.metrics().expect("RecordFetchExec metrics");
+        assert_eq!(fetch.output_rows(), Some(5));
+        assert_eq!(count(&fetch, "fetch_calls"), 2);
+        assert_eq!(count(&fetch, "input_rows"), 5);
+        assert_eq!(count(&fetch, "fetched_rows"), 5);
+        assert!(count(&fetch, "fetch_time") > 0);
+
+        let scan = exec.input.metrics().expect("IndexScanExec metrics");
+        assert_eq!(exec.input.name(), "IndexScanExec");
+        assert_eq!(scan.output_rows(), Some(5));
+        assert!(scan.elapsed_compute().is_some_and(|t| t > 0));
 
         Ok(())
     }
