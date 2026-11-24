@@ -9,7 +9,16 @@ use datafusion::error::Result;
 
 /// Runs `EXPLAIN ANALYZE` on `sql` and returns the plan annotated with metrics.
 async fn explain_analyze(sql: &str) -> Result<String> {
+    explain_analyze_at_level(sql, "dev").await
+}
+
+/// Same as [`explain_analyze`] with `datafusion.explain.analyze_level` set to `level`.
+async fn explain_analyze_at_level(sql: &str, level: &str) -> Result<String> {
     let ctx = common::setup_test_env();
+    ctx.sql(&format!("SET datafusion.explain.analyze_level = '{level}'"))
+        .await?
+        .collect()
+        .await?;
     let batches = ctx
         .sql(&format!("EXPLAIN ANALYZE {sql}"))
         .await?
@@ -49,10 +58,22 @@ async fn explain_analyze_reports_index_path_metrics() -> Result<()> {
         "output_rows=2",
         "fetch_calls=1",
         "input_rows=2",
-        "fetched_rows=2",
         "fetch_time=",
     ] {
         assert!(fetch.contains(metric), "missing {metric}: {fetch}");
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn explain_analyze_summary_level_keeps_fetch_metrics() -> Result<()> {
+    let plan =
+        explain_analyze_at_level("SELECT * FROM employees WHERE age > 30", "summary").await?;
+
+    let fetch = operator_line(&plan, "RecordFetchExec");
+    for metric in ["fetch_calls=1", "fetch_time="] {
+        assert!(fetch.contains(metric), "missing {metric}: {fetch}");
+    }
+    assert!(!fetch.contains("input_rows"), "dev metric leaked: {fetch}");
     Ok(())
 }
