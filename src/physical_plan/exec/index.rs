@@ -52,6 +52,17 @@ use std::task::{Context, Poll};
 /// - Filter selectivity directly impacts downstream performance
 /// - Limit pushdown reduces unnecessary index scanning and memory usage
 /// - Ordered indexes enable optimized downstream joins via `SortMergeJoin`
+///
+/// ## Tracing
+/// `execute` opens a `debug` level `index_scan` span, and `RecordFetchExec` opens a
+/// `record_fetch` span per fetch call. They are children of whichever span is current
+/// when `execute` runs. `DataFusion` may run partitions in spawned tasks (for example a
+/// parallel OR through `CoalescePartitionsExec`), where the query span is not current,
+/// so these spans can end up detached from it. To keep them parented, register a
+/// `JoinSetTracer` in the application with
+/// `datafusion::common::runtime::set_join_set_tracer`, or use
+/// [datafusion-tracing](https://github.com/datafusion-contrib/datafusion-tracing).
+/// This crate does not register a tracer itself.
 #[derive(Debug)]
 pub struct IndexScanExec {
     /// The index to scan.
@@ -130,7 +141,7 @@ impl ExecutionPlan for IndexScanExec {
         }
 
         let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "index_scan",
             index = self.index.name(),
             table = self.index.table_name(),

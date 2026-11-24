@@ -31,8 +31,8 @@ use datafusion::arrow::datatypes::{Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::metrics::{
-    BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder, MetricCategory, MetricsSet,
-    Time,
+    BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder, MetricCategory, MetricType,
+    MetricsSet, Time,
 };
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, Partitioning, PlanProperties,
@@ -477,8 +477,6 @@ struct FetchMetrics {
     fetch_calls: Count,
     /// Primary key rows received from the index input and passed to the fetcher.
     input_rows: Count,
-    /// Rows returned by the fetcher.
-    fetched_rows: Count,
     /// Wall-clock time spent awaiting [`RecordFetcher::fetch`].
     fetch_time: Time,
 }
@@ -488,14 +486,14 @@ impl FetchMetrics {
         Self {
             fetch_calls: MetricBuilder::new(metrics)
                 .with_category(MetricCategory::Rows)
+                .with_type(MetricType::Summary)
                 .counter("fetch_calls", partition),
             input_rows: MetricBuilder::new(metrics)
                 .with_category(MetricCategory::Rows)
                 .counter("input_rows", partition),
-            fetched_rows: MetricBuilder::new(metrics)
-                .with_category(MetricCategory::Rows)
-                .counter("fetched_rows", partition),
-            fetch_time: MetricBuilder::new(metrics).subset_time("fetch_time", partition),
+            fetch_time: MetricBuilder::new(metrics)
+                .with_type(MetricType::Summary)
+                .subset_time("fetch_time", partition),
         }
     }
 }
@@ -575,21 +573,19 @@ impl Stream for RecordFetchStream {
                             let keys = batch.num_rows();
                             self.fetch_metrics.fetch_calls.add(1);
                             self.fetch_metrics.input_rows.add(keys);
-                            let span = tracing::info_span!(
+                            let span = tracing::debug_span!(
                                 "record_fetch",
                                 keys,
                                 fetched_rows = tracing::field::Empty,
                             );
                             let fut = {
                                 let fetcher = fetcher.clone();
-                                let fetched_rows = self.fetch_metrics.fetched_rows.clone();
                                 let fetch_time = self.fetch_metrics.fetch_time.clone();
                                 async move {
                                     let timer = fetch_time.timer();
                                     let result = fetcher.fetch(batch).await;
                                     timer.done();
                                     result.map(|batch| {
-                                        fetched_rows.add(batch.num_rows());
                                         tracing::Span::current()
                                             .record("fetched_rows", batch.num_rows());
                                         (input, fetcher, batch)
@@ -1389,7 +1385,6 @@ mod tests {
         assert_eq!(fetch.output_rows(), Some(5));
         assert_eq!(count(&fetch, "fetch_calls"), 2);
         assert_eq!(count(&fetch, "input_rows"), 5);
-        assert_eq!(count(&fetch, "fetched_rows"), 5);
         // An unrecorded `Time` aggregates to 1ns, and each recorded span adds at
         // least 1ns, so `> 1` proves the timers were actually fed.
         assert!(count(&fetch, "fetch_time") > 1);
