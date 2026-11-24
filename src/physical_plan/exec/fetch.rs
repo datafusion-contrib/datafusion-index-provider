@@ -83,7 +83,8 @@ impl RecordFetchExec {
     ///
     /// # Errors
     /// Returns an error if `indexes` is empty, contains more than one root filter,
-    /// or if the input scan plan cannot be built.
+    /// if the input scan plan cannot be built, or if `schema` fields do not match
+    /// [`RecordFetcher::schema`].
     pub fn try_new(
         indexes: Vec<IndexFilter>,
         limit: Option<usize>,
@@ -101,6 +102,13 @@ impl RecordFetchExec {
             return Err(DataFusionError::Internal(
                 "RecordFetchExec expects a single root IndexFilter".to_string(),
             ));
+        }
+
+        let fetcher_schema = record_fetcher.schema();
+        if schema.fields() != fetcher_schema.fields() {
+            return Err(DataFusionError::Plan(format!(
+                "RecordFetchExec schema does not match RecordFetcher::schema(): expected {schema:?}, fetcher returned {fetcher_schema:?}"
+            )));
         }
 
         let input = match indexes.first() {
@@ -1036,6 +1044,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_record_fetch_exec_schema_mismatch() -> Result<()> {
+        let index = Arc::new(MockIndex::new(vec![]));
+        let indexes: Vec<IndexFilter> = vec![IndexFilter::Single {
+            index: index as Arc<dyn Index>,
+            filter: col("a").eq(lit(1)),
+        }];
+
+        let fetcher = Arc::new(MockRecordFetcher::new());
+        let err = RecordFetchExec::try_new(
+            indexes,
+            None,
+            fetcher,
+            Arc::new(Schema::empty()),
+            UnionMode::Parallel,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, DataFusionError::Plan(ref msg) if msg.contains("does not match RecordFetcher::schema()")),
+            "Unexpected error: {err:?}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_record_fetch_exec_single_index() -> Result<()> {
         let index_batch = RecordBatch::try_from_iter(vec![(
             PK_COL,
@@ -1048,13 +1080,8 @@ mod tests {
         }];
 
         let fetcher = Arc::new(MockRecordFetcher::new());
-        let exec = RecordFetchExec::try_new(
-            indexes,
-            None,
-            fetcher,
-            Arc::new(Schema::empty()),
-            UnionMode::Parallel,
-        )?;
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(indexes, None, fetcher, schema, UnionMode::Parallel)?;
 
         // The input plan should be just the IndexScanExec
         assert_eq!(exec.input.name(), "IndexScanExec");
@@ -1088,13 +1115,8 @@ mod tests {
         ])];
 
         let fetcher = Arc::new(MockRecordFetcher::new());
-        let exec = RecordFetchExec::try_new(
-            indexes,
-            None,
-            fetcher,
-            Arc::new(Schema::empty()),
-            UnionMode::Parallel,
-        )?;
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(indexes, None, fetcher, schema, UnionMode::Parallel)?;
 
         // The input plan should be a ProjectionExec wrapping a HashJoinExec
         assert_eq!(exec.input.name(), "ProjectionExec");
@@ -1127,13 +1149,8 @@ mod tests {
 
         let indexes = vec![IndexFilter::And(indexes_vec)];
         let fetcher = Arc::new(MockRecordFetcher::new());
-        let exec = RecordFetchExec::try_new(
-            indexes,
-            None,
-            fetcher,
-            Arc::new(Schema::empty()),
-            UnionMode::Parallel,
-        )?;
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(indexes, None, fetcher, schema, UnionMode::Parallel)?;
 
         // The input plan should be a ProjectionExec at the top
         assert_eq!(exec.input.name(), "ProjectionExec");
@@ -1199,13 +1216,8 @@ mod tests {
         let fetcher = Arc::new(MockRecordFetcher::new().with_data());
 
         // 2. Create exec plan
-        let exec = RecordFetchExec::try_new(
-            indexes,
-            None,
-            fetcher,
-            Arc::new(Schema::empty()),
-            UnionMode::Parallel,
-        )?;
+        let schema = fetcher.schema();
+        let exec = RecordFetchExec::try_new(indexes, None, fetcher, schema, UnionMode::Parallel)?;
 
         // 3. Execute and collect results
         let task_ctx = Arc::new(TaskContext::default());
