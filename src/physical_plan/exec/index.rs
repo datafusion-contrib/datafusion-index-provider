@@ -122,7 +122,16 @@ impl ExecutionPlan for IndexScanExec {
             ));
         }
 
-        self.index.scan(&self.filters, self.limit)
+        let stream = self.index.scan(&self.filters, self.limit)?;
+        let stream_schema = stream.schema();
+        let index_schema = self.index.index_schema();
+        if stream_schema.fields() != index_schema.fields() {
+            return Err(DataFusionError::Internal(format!(
+                "Index '{}' scan stream schema does not match Index::index_schema(): stream returned {stream_schema:?}, expected {index_schema:?}",
+                self.index.name()
+            )));
+        }
+        Ok(stream)
     }
 
     fn apply_expressions(
@@ -199,6 +208,7 @@ mod tests {
     struct MockIndex {
         schema: SchemaRef,
         scan_called: Mutex<bool>,
+        scan_schema: Option<SchemaRef>,
     }
 
     impl MockIndex {
@@ -206,7 +216,14 @@ mod tests {
             Self {
                 schema: Arc::new(Schema::new(vec![Field::new("id", DataType::UInt64, false)])),
                 scan_called: Mutex::new(false),
+                scan_schema: None,
             }
+        }
+
+        /// Makes `scan` return a stream whose schema differs from `index_schema()`.
+        fn with_scan_schema(mut self, schema: SchemaRef) -> Self {
+            self.scan_schema = Some(schema);
+            self
         }
     }
 
@@ -237,8 +254,9 @@ mod tests {
             _limit: Option<usize>,
         ) -> Result<SendableRecordBatchStream, DataFusionError> {
             *self.scan_called.lock().unwrap() = true;
-            let batch = RecordBatch::new_empty(self.schema.clone());
-            let stream = MemoryStream::try_new(vec![batch], self.schema.clone(), None)?;
+            let schema = self.scan_schema.clone().unwrap_or(self.schema.clone());
+            let batch = RecordBatch::new_empty(schema.clone());
+            let stream = MemoryStream::try_new(vec![batch], schema, None)?;
             Ok(Box::pin(stream))
         }
 
@@ -281,6 +299,30 @@ mod tests {
                     "unexpected error message: {e}"
                 );
             }
+            Ok(_) => panic!("expected an error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_index_scan_exec_stream_schema_mismatch() {
+        let wrong_schema = Arc::new(Schema::new(vec![Field::new(
+            "other",
+            DataType::Utf8,
+            false,
+        )]));
+        let index = Arc::new(MockIndex::new().with_scan_schema(wrong_schema));
+        let schema = index.index_schema();
+        let exec = IndexScanExec::try_new(index, vec![], None, schema).unwrap();
+
+        let task_ctx = Arc::new(TaskContext::default());
+        match exec.execute(0, task_ctx) {
+            Err(DataFusionError::Internal(msg)) => {
+                assert!(
+                    msg.contains("mock_index"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            Err(e) => panic!("unexpected error variant: {e:?}"),
             Ok(_) => panic!("expected an error"),
         }
     }
