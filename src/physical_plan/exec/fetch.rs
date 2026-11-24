@@ -39,6 +39,7 @@ use datafusion::physical_plan::{
     RecordBatchStream,
 };
 use futures::stream::{Stream, StreamExt};
+use tracing::Instrument;
 
 use crate::physical_plan::exec::index::IndexScanExec;
 use crate::physical_plan::exec::sequential_union::SequentialUnionExec;
@@ -89,6 +90,15 @@ impl RecordFetchExec {
     /// Returns an error if `indexes` is empty, contains more than one root filter,
     /// if the input scan plan cannot be built, or if `schema` fields do not match
     /// [`RecordFetcher::schema`].
+    #[tracing::instrument(
+        level = "debug",
+        skip_all,
+        fields(
+            index_filter = %indexes.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+            limit = ?limit,
+            union_mode = ?union_mode,
+        )
+    )]
     pub fn try_new(
         indexes: Vec<IndexFilter>,
         limit: Option<usize>,
@@ -538,6 +548,7 @@ enum FetchState {
 
 impl RecordFetchStream {
     /// Create a new `RecordFetchStream`.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn new(
         input: SendableRecordBatchStream,
         fetcher: Arc<dyn RecordFetcher>,
@@ -570,8 +581,14 @@ impl Stream for RecordFetchStream {
                     match input.poll_next_unpin(cx) {
                         Poll::Ready(Some(Ok(batch))) if batch.num_rows() > 0 => {
                             // Start async fetch for non-empty batch
+                            let keys = batch.num_rows();
                             self.fetch_metrics.fetch_calls.add(1);
-                            self.fetch_metrics.input_rows.add(batch.num_rows());
+                            self.fetch_metrics.input_rows.add(keys);
+                            let span = tracing::debug_span!(
+                                "record_fetch",
+                                keys,
+                                fetched_rows = tracing::field::Empty,
+                            );
                             let fut = {
                                 let fetcher = fetcher.clone();
                                 let fetch_time = self.fetch_metrics.fetch_time.clone();
@@ -579,8 +596,13 @@ impl Stream for RecordFetchStream {
                                     let timer = fetch_time.timer();
                                     let result = fetcher.fetch(batch).await;
                                     timer.done();
-                                    result.map(|batch| (input, fetcher, batch))
+                                    result.map(|batch| {
+                                        tracing::Span::current()
+                                            .record("fetched_rows", batch.num_rows());
+                                        (input, fetcher, batch)
+                                    })
                                 }
+                                .instrument(span)
                                 .boxed()
                             };
                             self.state = FetchState::Fetching(fut);
