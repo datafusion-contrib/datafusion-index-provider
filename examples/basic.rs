@@ -65,38 +65,49 @@ impl AgeIndex {
         Self { index }
     }
 
-    fn matching_ids(&self, filters: &[Expr], limit: Option<usize>) -> Vec<u64> {
+    /// Returns `(op, value)` for the only filter shape this index evaluates:
+    /// `age <op> <Int32 literal>` with `op` in `=`, `>`, `>=`, `<` or `<=`.
+    fn parse_filter(expr: &Expr) -> Option<(Operator, i32)> {
+        let Expr::BinaryExpr(be) = expr else {
+            return None;
+        };
+        match (be.left.as_ref(), be.right.as_ref(), be.op) {
+            (
+                Expr::Column(c),
+                Expr::Literal(ScalarValue::Int32(Some(v)), _),
+                op @ (Operator::Eq | Operator::Gt | Operator::GtEq | Operator::Lt | Operator::LtEq),
+            ) if c.name == "age" => Some((op, *v)),
+            _ => None,
+        }
+    }
+
+    fn matching_ids(&self, filters: &[Expr], limit: Option<usize>) -> Result<Vec<u64>> {
         let mut ids: BTreeSet<u64> = BTreeSet::new();
         for filter in filters {
-            if let Expr::BinaryExpr(be) = filter {
-                if let (Expr::Column(c), Expr::Literal(ScalarValue::Int32(Some(v)), _)) =
-                    (be.left.as_ref(), be.right.as_ref())
-                {
-                    if c.name != "age" {
-                        continue;
-                    }
-                    match be.op {
-                        Operator::Eq => {
-                            if let Some(list) = self.index.get(v) {
-                                ids.extend(list);
-                            }
-                        }
-                        Operator::Gt => {
-                            ids.extend(self.index.range((v + 1)..).flat_map(|(_, l)| l));
-                        }
-                        Operator::GtEq => ids.extend(self.index.range(v..).flat_map(|(_, l)| l)),
-                        Operator::Lt => ids.extend(self.index.range(..v).flat_map(|(_, l)| l)),
-                        Operator::LtEq => ids.extend(self.index.range(..=v).flat_map(|(_, l)| l)),
-                        _ => {}
+            // Never drop a filter silently: that would return wrong rows.
+            let Some((op, v)) = Self::parse_filter(filter) else {
+                return Err(DataFusionError::NotImplemented(format!(
+                    "age_index cannot evaluate filter: {filter}"
+                )));
+            };
+            match op {
+                Operator::Eq => {
+                    if let Some(list) = self.index.get(&v) {
+                        ids.extend(list);
                     }
                 }
+                Operator::Gt => ids.extend(self.index.range((v + 1)..).flat_map(|(_, l)| l)),
+                Operator::GtEq => ids.extend(self.index.range(v..).flat_map(|(_, l)| l)),
+                Operator::Lt => ids.extend(self.index.range(..v).flat_map(|(_, l)| l)),
+                Operator::LtEq => ids.extend(self.index.range(..=v).flat_map(|(_, l)| l)),
+                _ => unreachable!("parse_filter only returns the operators handled above"),
             }
         }
         let mut result: Vec<u64> = ids.into_iter().collect();
         if let Some(l) = limit {
             result.truncate(l);
         }
-        result
+        Ok(result)
     }
 }
 
@@ -116,12 +127,18 @@ impl Index for AgeIndex {
     fn column_name(&self) -> &'static str {
         "age"
     }
+    // Only claim the filters `scan` evaluates. The default implementation accepts any
+    // expression on `age` (`age <> 30`, `age IS NOT NULL`, `age + 1 > 30`, ...); DataFusion
+    // would then treat it as fully handled and drop it, returning wrong rows.
+    fn supports_predicate(&self, predicate: &Expr) -> Result<bool> {
+        Ok(Self::parse_filter(predicate).is_some())
+    }
     fn scan(
         &self,
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, DataFusionError> {
-        let ids = self.matching_ids(filters, limit);
+        let ids = self.matching_ids(filters, limit)?;
         let batches = if ids.is_empty() {
             vec![]
         } else {

@@ -318,3 +318,25 @@ SELECT * FROM employees WHERE age > 29.5
 2 Bob 30 Sales
 3 Charlie 35 Marketing
 5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age IS NOT NULL
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age + 1 > 30
+----
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE CAST(age AS BIGINT) > 30
+----
+3 Charlie 35 Marketing
+5 Eve 32 Sales
