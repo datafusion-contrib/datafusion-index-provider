@@ -95,6 +95,11 @@ pub enum UnionMode {
     /// This mode processes all input partitions sequentially in a single stream
     /// without spawning any tasks. Required for non-Tokio runtimes such as
     /// custom async executors that don't support Tokio task spawning.
+    ///
+    /// This mode requires `target_partitions = 1` in the `DataFusion` session. It only
+    /// covers the plan built by this crate: operators that `DataFusion` adds above the
+    /// scan (for example `RepartitionExec` or `CoalescePartitionsExec` when running with
+    /// several partitions) are out of its control.
     Sequential,
 }
 
