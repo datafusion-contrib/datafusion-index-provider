@@ -12,6 +12,7 @@ use datafusion_common::{DataFusionError, Result};
 use datafusion_index_provider::physical_plan::Index;
 
 use super::composite_pk_provider::composite_pk_schema;
+use super::is_column_op_literal;
 
 #[derive(Debug)]
 pub struct CompositePkAgeIndex {
@@ -121,6 +122,15 @@ impl Index for CompositePkAgeIndex {
 
     fn column_name(&self) -> &'static str {
         "age"
+    }
+
+    fn supports_predicate(&self, predicate: &Expr) -> Result<bool> {
+        Ok(is_column_op_literal(
+            predicate,
+            "age",
+            &[Operator::Eq, Operator::Gt, Operator::LtEq],
+            |v| matches!(v, ScalarValue::Int32(Some(_))),
+        ))
     }
 
     fn scan(
