@@ -17,6 +17,7 @@
 
 use crate::physical_plan::Index;
 use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
@@ -24,11 +25,15 @@ use datafusion::logical_expr::Expr;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::Boundedness;
 use datafusion::physical_plan::expressions::{Column, PhysicalSortExpr};
+use datafusion::physical_plan::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use datafusion::physical_plan::{
     execution_plan::EmissionType, DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning,
-    PhysicalExpr, PlanProperties, SendableRecordBatchStream,
+    PhysicalExpr, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
 };
+use futures::{Stream, StreamExt};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 /// Physical execution plan for scanning an index to produce row IDs.
 ///
@@ -57,6 +62,8 @@ pub struct IndexScanExec {
     limit: Option<usize>,
     /// Properties of the plan.
     plan_properties: Arc<PlanProperties>,
+    /// Execution metrics.
+    metrics: ExecutionPlanMetricsSet,
 }
 
 impl DisplayAs for IndexScanExec {
@@ -122,7 +129,11 @@ impl ExecutionPlan for IndexScanExec {
             ));
         }
 
-        let stream = self.index.scan(&self.filters, self.limit)?;
+        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let stream = {
+            let _timer = baseline_metrics.elapsed_compute().timer();
+            self.index.scan(&self.filters, self.limit)?
+        };
         let stream_schema = stream.schema();
         let index_schema = self.index.index_schema();
         if stream_schema.fields() != index_schema.fields() {
@@ -131,7 +142,14 @@ impl ExecutionPlan for IndexScanExec {
                 self.index.name()
             )));
         }
-        Ok(stream)
+        Ok(Box::pin(IndexScanStream {
+            inner: stream,
+            baseline_metrics,
+        }))
+    }
+
+    fn metrics(&self) -> Option<MetricsSet> {
+        Some(self.metrics.clone_inner())
     }
 
     fn apply_expressions(
@@ -190,7 +208,33 @@ impl IndexScanExec {
             filters,
             limit,
             plan_properties,
+            metrics: ExecutionPlanMetricsSet::new(),
         })
+    }
+}
+
+/// Wraps the stream returned by [`Index::scan`] to record [`BaselineMetrics`].
+struct IndexScanStream {
+    inner: SendableRecordBatchStream,
+    baseline_metrics: BaselineMetrics,
+}
+
+impl RecordBatchStream for IndexScanStream {
+    fn schema(&self) -> SchemaRef {
+        self.inner.schema()
+    }
+}
+
+impl Stream for IndexScanStream {
+    type Item = Result<RecordBatch, DataFusionError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = &mut *self;
+        let poll = {
+            let _timer = this.baseline_metrics.elapsed_compute().timer();
+            this.inner.poll_next_unpin(cx)
+        };
+        this.baseline_metrics.record_poll(poll)
     }
 }
 

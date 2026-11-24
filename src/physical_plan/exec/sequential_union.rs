@@ -34,6 +34,7 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
+use datafusion::physical_plan::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
     Partitioning, PhysicalExpr, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
@@ -63,6 +64,8 @@ pub struct SequentialUnionExec {
     schema: SchemaRef,
     /// Cached plan properties
     properties: Arc<PlanProperties>,
+    /// Execution metrics
+    metrics: ExecutionPlanMetricsSet,
 }
 
 impl SequentialUnionExec {
@@ -112,6 +115,7 @@ impl SequentialUnionExec {
             inputs,
             schema,
             properties,
+            metrics: ExecutionPlanMetricsSet::new(),
         })
     }
 }
@@ -166,6 +170,8 @@ impl ExecutionPlan for SequentialUnionExec {
             )));
         }
 
+        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+
         // Create all streams upfront (follows DataFusion's InterleaveExec pattern)
         let mut streams = Vec::new();
         for input in &self.inputs {
@@ -179,7 +185,12 @@ impl ExecutionPlan for SequentialUnionExec {
             streams,
             current_index: 0,
             schema: Arc::clone(&self.schema),
+            baseline_metrics,
         }))
+    }
+
+    fn metrics(&self) -> Option<MetricsSet> {
+        Some(self.metrics.clone_inner())
     }
 
     fn apply_expressions(
@@ -198,6 +209,8 @@ struct SequentialUnionStream {
     current_index: usize,
     /// Output schema
     schema: SchemaRef,
+    /// Execution metrics
+    baseline_metrics: BaselineMetrics,
 }
 
 impl RecordBatchStream for SequentialUnionStream {
@@ -213,11 +226,13 @@ impl Stream for SequentialUnionStream {
         loop {
             let idx = self.current_index;
             if idx >= self.streams.len() {
-                return Poll::Ready(None);
+                return self.baseline_metrics.record_poll(Poll::Ready(None));
             }
 
             match Pin::new(&mut self.streams[idx]).poll_next(cx) {
-                Poll::Ready(Some(batch)) => return Poll::Ready(Some(batch)),
+                Poll::Ready(Some(batch)) => {
+                    return self.baseline_metrics.record_poll(Poll::Ready(Some(batch)))
+                }
                 Poll::Ready(None) => self.current_index += 1,
                 Poll::Pending => return Poll::Pending,
             }
@@ -333,6 +348,21 @@ mod tests {
         );
 
         assert!(stream.next().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sequential_union_metrics() -> Result<()> {
+        let input1 = create_memory_exec(vec![create_test_batch(vec![1, 2])]);
+        let input2 = create_memory_exec(vec![create_test_batch(vec![3, 4, 5])]);
+        let union = SequentialUnionExec::try_new(vec![input1, input2])?;
+
+        let ctx = Arc::new(TaskContext::default());
+        let batches = datafusion::physical_plan::common::collect(union.execute(0, ctx)?).await?;
+        assert_eq!(batches.len(), 2);
+
+        let metrics = union.metrics().expect("metrics should be exposed");
+        assert_eq!(metrics.output_rows(), Some(5));
         Ok(())
     }
 
