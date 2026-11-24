@@ -182,13 +182,18 @@ impl RecordFetchExec {
     ///
     /// ```text
     /// AggregateExec(GROUP BY PK columns,
-    ///   UnionExec(
-    ///     IndexScanExec(index1, filter1),
-    ///     IndexScanExec(index2, filter2),
-    ///     IndexScanExec(index3, filter3)
+    ///   CoalescePartitionsExec(      // Parallel mode only
+    ///     UnionExec(
+    ///       IndexScanExec(index1, filter1),
+    ///       IndexScanExec(index2, filter2),
+    ///       IndexScanExec(index3, filter3)
+    ///     )
     ///   )
     /// )
     /// ```
+    ///
+    /// In [`UnionMode::Sequential`] the `UnionExec` and `CoalescePartitionsExec` are replaced
+    /// by a single `SequentialUnionExec`.
     ///
     /// # Arguments
     /// * `index_filter` - The [`IndexFilter`] tree specifying which indexes to scan and how to combine them
