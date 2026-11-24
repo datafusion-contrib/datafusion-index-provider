@@ -14,6 +14,8 @@ use datafusion_common::{DataFusionError, Result};
 use datafusion_index_provider::physical_plan::create_index_schema;
 use datafusion_index_provider::physical_plan::Index;
 
+use crate::common::{ensure_supported, is_column_op_literal};
+
 #[derive(Debug)]
 pub struct AgeIndex {
     index: BTreeMap<i32, Vec<u64>>,
@@ -125,11 +127,27 @@ impl Index for AgeIndex {
         "age"
     }
 
+    fn supports_predicate(&self, predicate: &Expr) -> Result<bool> {
+        Ok(is_column_op_literal(
+            predicate,
+            "age",
+            &[
+                Operator::Eq,
+                Operator::Gt,
+                Operator::GtEq,
+                Operator::Lt,
+                Operator::LtEq,
+            ],
+            |v| matches!(v, ScalarValue::Int32(Some(_))),
+        ))
+    }
+
     fn scan(
         &self,
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, DataFusionError> {
+        ensure_supported(self, filters)?;
         let data = self.create_data_from_filters(filters, limit);
         log::debug!("Age index data: {data:?}");
 

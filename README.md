@@ -38,9 +38,17 @@ impl Index for MyIndex {
     }
     fn table_name(&self) -> &str { "my_table" }
 
+    // Only accept the filters `scan` can evaluate. The default accepts any expression on
+    // `column_name()` (`<>`, `IS NOT NULL`, `col + 1 > 30`, ...), which DataFusion then
+    // treats as fully handled and drops, silently returning wrong rows.
+    fn supports_predicate(&self, predicate: &Expr) -> Result<bool> {
+        // e.g. true only for `indexed_column <op> literal` with the operators scan handles
+    }
+
     fn scan(&self, filters: &[Expr], limit: Option<usize>)
         -> Result<SendableRecordBatchStream> {
-        // Return RecordBatch stream with primary key columns matching the filters
+        // Return RecordBatch stream with primary key columns matching the filters,
+        // or an error for a filter you cannot evaluate (never ignore it)
     }
 
     fn statistics(&self) -> Statistics { /* index statistics */ }

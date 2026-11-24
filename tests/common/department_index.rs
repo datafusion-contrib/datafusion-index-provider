@@ -14,6 +14,8 @@ use datafusion_common::{DataFusionError, Result};
 use datafusion_index_provider::physical_plan::create_index_schema;
 use datafusion_index_provider::physical_plan::Index;
 
+use crate::common::{ensure_supported, is_column_op_literal};
+
 #[derive(Debug)]
 pub struct DepartmentIndex {
     index: BTreeMap<String, Vec<u64>>,
@@ -94,11 +96,21 @@ impl Index for DepartmentIndex {
         "department"
     }
 
+    fn supports_predicate(&self, predicate: &Expr) -> Result<bool> {
+        Ok(is_column_op_literal(
+            predicate,
+            "department",
+            &[Operator::Eq],
+            |v| matches!(v, ScalarValue::Utf8(Some(_))),
+        ))
+    }
+
     fn scan(
         &self,
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, DataFusionError> {
+        ensure_supported(self, filters)?;
         let data = self.create_data_from_filters(filters, limit);
         log::debug!("Department index data: {data:?}");
         Ok(Box::pin(MemoryStream::try_new(

@@ -48,6 +48,7 @@ use crate::physical_plan::joins::try_create_index_lookup_join;
 use crate::types::{IndexFilter, IndexFilters, UnionMode};
 use datafusion::common::tree_node::TreeNodeRecursion;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
+use datafusion::physical_plan::coalesce_partitions::CoalescePartitionsExec;
 use datafusion::physical_plan::empty::EmptyExec;
 use datafusion::physical_plan::expressions::Column;
 use datafusion::physical_plan::limit::LocalLimitExec;
@@ -194,13 +195,18 @@ impl RecordFetchExec {
     ///
     /// ```text
     /// AggregateExec(GROUP BY PK columns,
-    ///   UnionExec(
-    ///     IndexScanExec(index1, filter1),
-    ///     IndexScanExec(index2, filter2),
-    ///     IndexScanExec(index3, filter3)
+    ///   CoalescePartitionsExec(      // Parallel mode only
+    ///     UnionExec(
+    ///       IndexScanExec(index1, filter1),
+    ///       IndexScanExec(index2, filter2),
+    ///       IndexScanExec(index3, filter3)
+    ///     )
     ///   )
     /// )
     /// ```
+    ///
+    /// In [`UnionMode::Sequential`] the `UnionExec` and `CoalescePartitionsExec` are replaced
+    /// by a single `SequentialUnionExec`.
     ///
     /// # Arguments
     /// * `index_filter` - The [`IndexFilter`] tree specifying which indexes to scan and how to combine them
@@ -275,7 +281,12 @@ impl RecordFetchExec {
 
                 // Create union based on mode
                 let union_input: Arc<dyn ExecutionPlan> = match union_mode {
-                    UnionMode::Parallel => UnionExec::try_new(normalized_plans)?,
+                    // The union exposes one partition per arm, but the aggregate
+                    // only reads partition 0: coalesce so every arm is consumed
+                    // even without the EnforceDistribution optimizer rule.
+                    UnionMode::Parallel => Arc::new(CoalescePartitionsExec::new(
+                        UnionExec::try_new(normalized_plans)?,
+                    )),
                     UnionMode::Sequential => {
                         Arc::new(SequentialUnionExec::try_new(normalized_plans)?)
                     }
@@ -1545,6 +1556,32 @@ mod tests {
         assert_eq!(fetcher.rows_fetched(), 10);
         assert_eq!(returned, 10);
         assert!(fetcher.fetch_calls() > 0);
+        Ok(())
+    }
+
+    /// Parallel OR must consume every arm when executed directly, without the
+    /// `EnforceDistribution` optimizer rule inserting a coalesce.
+    #[tokio::test]
+    async fn test_parallel_or_direct_execution_returns_all_arms() -> Result<()> {
+        let indexes = vec![IndexFilter::Or(limit_index_batches(vec![
+            vec![1, 2, 3, 4, 5],
+            vec![6, 7, 8, 9, 10],
+        ])?)];
+
+        let fetcher = Arc::new(MockRecordFetcher::new().with_data());
+        let schema = fetcher.schema();
+        let exec =
+            RecordFetchExec::try_new(indexes, None, fetcher.clone(), schema, UnionMode::Parallel)?;
+
+        let task_ctx = Arc::new(TaskContext::default());
+        let mut stream = exec.execute(0, task_ctx)?;
+        let mut returned = 0;
+        while let Some(batch) = stream.next().await {
+            returned += batch?.num_rows();
+        }
+
+        assert_eq!(fetcher.rows_fetched(), 10);
+        assert_eq!(returned, 10);
         Ok(())
     }
 
