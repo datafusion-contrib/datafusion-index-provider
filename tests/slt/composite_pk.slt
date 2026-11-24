@@ -74,3 +74,12 @@ query TI rowsort
 SELECT name, employee_id FROM employees WHERE age = 30
 ----
 Bob 2
+
+# --- operator the age index does not handle falls back to the non-indexed path ---
+
+query TITIT rowsort
+SELECT * FROM employees WHERE age < 31
+----
+acme 1 Alice 25 Engineering
+acme 2 Bob 30 Sales
+globex 1 David 28 Engineering

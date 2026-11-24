@@ -136,6 +136,7 @@ SELECT * FROM employees WHERE
     )
 ----
 1 Alice 25 Engineering
+2 Bob 30 Sales
 4 David 28 Engineering
 
 query ITIT rowsort
@@ -286,3 +287,34 @@ query T
 SELECT name FROM employees WHERE age = 25 OR age = 30 ORDER BY name LIMIT 1
 ----
 Alice
+
+# --- operators the age index does not handle fall back to the non-indexed path ---
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age <> 30
+----
+1 Alice 25 Engineering
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE NOT (age = 30 OR age = 25)
+----
+3 Charlie 35 Marketing
+4 David 28 Engineering
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age IN (25, 30, 32, 99)
+----
+1 Alice 25 Engineering
+2 Bob 30 Sales
+5 Eve 32 Sales
+
+query ITIT rowsort
+SELECT * FROM employees WHERE age > 29.5
+----
+2 Bob 30 Sales
+3 Charlie 35 Marketing
+5 Eve 32 Sales
