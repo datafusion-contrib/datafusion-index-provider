@@ -14,7 +14,7 @@ use datafusion_common::{DataFusionError, Result};
 use datafusion_index_provider::physical_plan::create_index_schema;
 use datafusion_index_provider::physical_plan::Index;
 
-use crate::common::is_column_op_literal;
+use crate::common::{ensure_supported, is_column_op_literal};
 
 #[derive(Debug)]
 pub struct AgeIndex {
@@ -147,6 +147,7 @@ impl Index for AgeIndex {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, DataFusionError> {
+        ensure_supported(self, filters)?;
         let data = self.create_data_from_filters(filters, limit);
         log::debug!("Age index data: {data:?}");
 

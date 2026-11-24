@@ -12,7 +12,7 @@ use datafusion_common::{DataFusionError, Result};
 use datafusion_index_provider::physical_plan::Index;
 
 use super::composite_pk_provider::composite_pk_schema;
-use super::is_column_op_literal;
+use super::{ensure_supported, is_column_op_literal};
 
 #[derive(Debug)]
 pub struct CompositePkAgeIndex {
@@ -138,6 +138,7 @@ impl Index for CompositePkAgeIndex {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, DataFusionError> {
+        ensure_supported(self, filters)?;
         let data = self.create_data_from_filters(filters, limit);
         Ok(Box::pin(MemoryStream::try_new(
             data,
