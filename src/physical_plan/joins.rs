@@ -63,6 +63,7 @@ use std::sync::Arc;
 /// - Place the more selective index scan on the left side for `HashJoin`
 /// - Ensure primary key columns are properly typed and indexed
 /// - Consider the memory vs. CPU trade-offs between join algorithms
+#[tracing::instrument(skip_all, fields(pk_columns = left.schema().fields().len()))]
 pub fn try_create_index_lookup_join(
     left: Arc<dyn ExecutionPlan>,
     right: Arc<dyn ExecutionPlan>,

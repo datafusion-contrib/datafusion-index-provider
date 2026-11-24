@@ -17,6 +17,7 @@ async-trait = "0.1.89"
 datafusion = { version = "55.2.0", default-features = false }
 datafusion-common = { version = "55.2.0", default-features = false }
 futures = "0.3.32"
+tracing = "0.1.44"
 
 [dev-dependencies]
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
@@ -27,6 +28,7 @@ datafusion = { version = "55.2.0", default-features = false, features = ["sql"] 
 datafusion-sqllogictest = { version = "55.2.0", default-features = false }
 sqllogictest = "0.29"
 indicatif = "0.18"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry"] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

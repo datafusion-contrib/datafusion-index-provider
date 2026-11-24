@@ -81,6 +81,7 @@ impl SequentialUnionExec {
     /// Returns an error if:
     /// - `inputs` is empty
     /// - Input schemas are incompatible
+    #[tracing::instrument(skip_all, fields(inputs = inputs.len()))]
     pub fn try_new(inputs: Vec<Arc<dyn ExecutionPlan>>) -> Result<Self> {
         if inputs.is_empty() {
             return Err(DataFusionError::Plan(

@@ -45,6 +45,7 @@ use std::sync::Arc;
 /// * `schema` - The schema of the output plan. All columns are treated as primary key columns.
 /// * `ordered` - Whether the output is ordered by the primary key columns.
 #[must_use]
+#[tracing::instrument(skip_all, fields(columns = schema.fields().len(), ordered = ordered))]
 pub fn create_plan_properties_for_pk_scan(
     schema: &SchemaRef,
     ordered: bool,
@@ -91,6 +92,7 @@ pub fn create_plan_properties_for_pk_scan(
 ///     Field::new("row_id", DataType::UInt64, false),
 /// ]);
 /// ```
+#[tracing::instrument(skip_all)]
 pub fn create_index_schema(fields: impl IntoIterator<Item = Field>) -> SchemaRef {
     Arc::new(Schema::new(fields.into_iter().collect::<Vec<_>>()))
 }

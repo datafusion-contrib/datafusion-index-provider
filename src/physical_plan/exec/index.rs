@@ -130,9 +130,16 @@ impl ExecutionPlan for IndexScanExec {
         }
 
         let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let span = tracing::info_span!(
+            "index_scan",
+            index = self.index.name(),
+            table = self.index.table_name(),
+            partition,
+            filters = self.filters.len(),
+        );
         let stream = {
             let _timer = baseline_metrics.elapsed_compute().timer();
-            self.index.scan(&self.filters, self.limit)?
+            span.in_scope(|| self.index.scan(&self.filters, self.limit))?
         };
         let stream_schema = stream.schema();
         let index_schema = self.index.index_schema();
@@ -176,6 +183,10 @@ impl IndexScanExec {
     ///
     /// # Errors
     /// Returns an error if the plan properties cannot be computed for the given schema.
+    #[tracing::instrument(
+        skip_all,
+        fields(index = index.name(), filters = filters.len(), limit = ?limit)
+    )]
     pub fn try_new(
         index: Arc<dyn Index>,
         filters: Vec<Expr>,

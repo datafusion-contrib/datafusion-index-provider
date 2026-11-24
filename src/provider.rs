@@ -65,12 +65,19 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     ///
     /// # Errors
     /// Returns an error if any filter expression cannot be analyzed against the indexes.
+    #[tracing::instrument(skip_all, fields(filters = filters.len()))]
     fn analyze_and_optimize_filters(&self, filters: &[Expr]) -> Result<(IndexFilters, Vec<Expr>)> {
         let (indexed_filters, remaining_filters): (Vec<_>, Vec<_>) = filters
             .iter()
             .map(|expr| match self.build_index_filter(expr) {
-                Ok(Some(filter)) => Ok((Some(filter), None)),
-                Ok(None) => Ok((None, Some(expr.clone()))),
+                Ok(Some(filter)) => {
+                    tracing::debug!(predicate = %expr, index = %filter, "predicate handled by index");
+                    Ok((Some(filter), None))
+                }
+                Ok(None) => {
+                    tracing::debug!(predicate = %expr, "predicate not handled by any index, kept as remaining filter");
+                    Ok((None, Some(expr.clone())))
+                }
                 Err(e) => Err(e),
             })
             .collect::<Result<Vec<_>>>()?
@@ -79,6 +86,12 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
 
         let indexed_filters: Vec<_> = indexed_filters.into_iter().flatten().collect();
         let remaining_filters: Vec<_> = remaining_filters.into_iter().flatten().collect();
+
+        tracing::debug!(
+            indexed = indexed_filters.len(),
+            remaining = remaining_filters.len(),
+            "index filter analysis done"
+        );
 
         let final_filters = match indexed_filters.len() {
             0 => Vec::new(),
@@ -97,6 +110,7 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     ///
     /// # Errors
     /// Returns an error if an index fails to evaluate whether it supports the expression.
+    #[tracing::instrument(level = "trace", skip_all, fields(expr = %expr))]
     fn build_index_filter(&self, expr: &Expr) -> Result<Option<IndexFilter>> {
         // Recursive step for AND/OR operators.
         if let Expr::BinaryExpr(be) = expr {
@@ -130,6 +144,7 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// # Errors
     /// Returns an error if the indexes cannot be listed or an index fails to evaluate
     /// whether it supports the expression.
+    #[tracing::instrument(level = "trace", skip_all, fields(expr = %expr))]
     fn find_index_for_expr(&self, expr: &Expr) -> Result<Option<IndexFilter>> {
         for index in self.indexes()? {
             if index.supports_predicate(expr)? {
@@ -169,6 +184,7 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     /// # Errors
     /// Returns an error if the indexes cannot be listed or an index fails to evaluate
     /// whether it supports a filter.
+    #[tracing::instrument(skip_all, fields(filters = filters.len()))]
     fn supports_filters_index_pushdown(
         &self,
         filters: &[&Expr],
@@ -205,6 +221,14 @@ pub trait IndexedTableProvider: TableProvider + Sync + Send {
     ///
     /// # Returns
     /// A `Result` containing an `Arc<dyn ExecutionPlan>` that can be used to scan the table.
+    #[tracing::instrument(
+        skip_all,
+        fields(
+            index_filters = indexes.len(),
+            remaining_filters = remaining_filters.len(),
+            limit = ?limit,
+        )
+    )]
     async fn create_execution_plan_with_indexes(
         &self,
         indexes: &[IndexFilter],
